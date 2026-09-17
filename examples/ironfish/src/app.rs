@@ -106,6 +106,8 @@ pub struct LifeControl {
     pub timer: Timer,
     pub seed: u32,
     pub generation: u64,
+    /// dev: one-shot timer that closes the life window (IRONFISH_CLOSE_LIFE_AFTER)
+    pub test_close_timer: Timer,
 }
 
 #[derive(Live)]
@@ -328,6 +330,9 @@ impl MatchEvent for App {
             self.ui.window(id!(life_window)).open(cx);
             self.set_life_enabled(cx, true);
             self.set_life_mode(cx, mode == "fractal");
+        }
+        if let Some(secs) = std::env::var("IRONFISH_CLOSE_LIFE_AFTER").ok().and_then(|v| v.parse::<f64>().ok()) {
+            self.life.test_close_timer = cx.start_timeout(secs);
         }
     }
 
@@ -785,6 +790,11 @@ impl AppMain for App {
         if let Event::Timer(te) = event {
             if self.life.timer.is_timer(te).is_some() && self.life.enabled {
                 self.life_tick(cx);
+            }
+            if self.life.test_close_timer.is_timer(te).is_some() {
+                cx.stop_timer(self.life.test_close_timer);
+                log!("IRONFISH_CLOSE_LIFE_AFTER: closing life window");
+                self.ui.window(id!(life_window)).close(cx);
             }
         }
         self.ui.handle_event(cx, event, &mut Scope::empty());

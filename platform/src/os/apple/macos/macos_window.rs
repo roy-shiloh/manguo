@@ -498,10 +498,29 @@ impl MacosWindow {
     }
 }
 
-pub fn get_cocoa_window(this: &Object) -> &mut MacosWindow {
+/// Back-pointer from an NSView / NSWindowDelegate to its MacosWindow.
+/// Returns None once the window has been dropped (Cocoa can still deliver
+/// late events such as mouseMoved to the view after the window closed).
+pub fn get_cocoa_window(this: &Object) -> Option<&mut MacosWindow> {
     unsafe {
         let ptr: *mut c_void = *this.get_ivar("macos_window_ptr");
-        &mut *(ptr as *mut MacosWindow)
+        if ptr.is_null() {
+            None
+        } else {
+            Some(&mut *(ptr as *mut MacosWindow))
+        }
+    }
+}
+
+impl Drop for MacosWindow {
+    fn drop(&mut self) {
+        unsafe {
+            // sever the raw back-pointers so late delegate/view callbacks
+            // see a null instead of freed memory
+            (*self.window_delegate).set_ivar("macos_window_ptr", std::ptr::null_mut::<c_void>());
+            (*self.view).set_ivar("macos_window_ptr", std::ptr::null_mut::<c_void>());
+            let () = msg_send![self.window, setDelegate: nil];
+        }
     }
 }
 

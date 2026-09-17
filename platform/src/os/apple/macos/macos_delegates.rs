@@ -154,7 +154,7 @@ pub fn define_cocoa_post_delegate() -> *const Class {
 pub fn define_macos_window_delegate() -> *const Class {
     
     extern "C" fn window_should_close(this: &Object, _: Sel, _: ObjcId) -> BOOL {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return YES };
         if cw.send_window_close_requested_event() {
             YES
         }
@@ -164,49 +164,49 @@ pub fn define_macos_window_delegate() -> *const Class {
     }
     
     extern "C" fn window_will_close(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_window_closed_event();
     }
     
     extern "C" fn window_did_resize(this: &Object, _: Sel, _: ObjcId) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
         //cw.send_change_event();
     }
     
     extern "C" fn window_will_start_live_resize(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.start_live_resize();
     }
     
     extern "C" fn window_did_end_live_resize(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.end_live_resize();
     }
     
     // This won't be triggered if the move was part of a resize.
     extern "C" fn window_did_move(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_change_event();
     }
     
     extern "C" fn window_did_change_screen(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_change_event();
     }
     
     // This will always be called before `window_did_change_screen`.
     extern "C" fn window_did_change_backing_properties(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_change_event();
     }
     
     extern "C" fn window_did_become_key(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_got_focus_event();
     }
     
     extern "C" fn window_did_resign_key(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_lost_focus_event();
     }
     
@@ -230,25 +230,25 @@ pub fn define_macos_window_delegate() -> *const Class {
     
     // Invoked when the dragging operation is cancelled
     extern "C" fn dragging_exited(this: &Object, _: Sel, _: ObjcId) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
         //WindowDelegate::emit_event(state, WindowEvent::HoveredFileCancelled);
     }
     
     // Invoked when entered fullscreen
     extern "C" fn window_did_enter_fullscreen(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.is_fullscreen = true;
         cw.send_change_event();
     }
     
     // Invoked when before enter fullscreen
     extern "C" fn window_will_enter_fullscreen(this: &Object, _: Sel, _: ObjcId) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
     }
     
     // Invoked when exited fullscreen
     extern "C" fn window_did_exit_fullscreen(this: &Object, _: Sel, _: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.is_fullscreen = false;
         cw.send_change_event();
     }
@@ -349,7 +349,7 @@ pub fn define_cocoa_view_class() -> *const Class {
     
     extern "C" fn mouse_down(this: &Object, _sel: Sel, event: ObjcId) {
         
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         unsafe {
             if cw.mouse_down_can_drag_window() {
                 let () = msg_send![cw.window, performWindowDragWithEvent: event];
@@ -362,32 +362,32 @@ pub fn define_cocoa_view_class() -> *const Class {
     
     
     extern "C" fn mouse_up(this: &Object, _sel: Sel, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let modifiers = get_event_key_modifier(event);
         cw.send_mouse_up(MouseButton::PRIMARY, modifiers);
     }
     
     extern "C" fn right_mouse_down(this: &Object, _sel: Sel, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let modifiers = get_event_key_modifier(event);
         cw.send_mouse_down(MouseButton::SECONDARY, modifiers);
     }
     
     extern "C" fn right_mouse_up(this: &Object, _sel: Sel, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let modifiers = get_event_key_modifier(event);
         cw.send_mouse_up(MouseButton::SECONDARY, modifiers);
     }
     
     extern "C" fn other_mouse_down(this: &Object, _sel: Sel, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let modifiers = get_event_key_modifier(event);
         let raw_button = get_event_mouse_button(event);
         cw.send_mouse_down(MouseButton::from_raw_button(raw_button), modifiers);
     }
     
     extern "C" fn other_mouse_up(this: &Object, _sel: Sel, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let modifiers = get_event_key_modifier(event);
         let raw_button = get_event_mouse_button(event);
         cw.send_mouse_up(MouseButton::from_raw_button(raw_button), modifiers);
@@ -416,7 +416,7 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     fn mouse_motion(this: &Object, event: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         let pos = mouse_pos_from_event(this, event);
         let modifiers = get_event_key_modifier(event);
         cw.send_mouse_move(event, pos, modifiers);
@@ -439,7 +439,7 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     extern "C" fn draw_rect(this: &Object, _sel: Sel, rect: NSRect) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
         unsafe {
             let superclass = superclass(this);
             let () = msg_send![super (this, superclass), drawRect: rect];
@@ -539,7 +539,9 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     extern "C" fn first_rect_for_character_range(this: &Object, _sel: Sel, _range: NSRange, _actual_range: *mut c_void) -> NSRect {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else {
+            return NSRect {origin: NSPoint {x: 0.0, y: 0.0}, size: NSSize {width: 0.0, height: 0.0}};
+        };
         
         let view: ObjcId = this as *const _ as *mut _;
         //let window_point = event.locationInWindow();
@@ -559,7 +561,7 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     extern "C" fn insert_text(this: &Object, _sel: Sel, string: ObjcId, replacement_range: NSRange) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         unsafe {
             let has_attr = msg_send![string, isKindOfClass: class!(NSAttributedString)];
             let characters = if has_attr {
@@ -577,11 +579,11 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     extern "C" fn do_command_by_selector(this: &Object, _sel: Sel, _command: Sel) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
     }
     
     extern "C" fn key_down(this: &Object, _sel: Sel, event: ObjcId) {
-        let _cw = get_cocoa_window(this);
+        let Some(_cw) = get_cocoa_window(this) else { return };
         unsafe {
             let input_context: ObjcId = msg_send![this, inputContext];
             let () = msg_send![input_context, handleEvent: event];
@@ -619,17 +621,17 @@ pub fn define_cocoa_view_class() -> *const Class {
     
     
     extern "C" fn display_layer(this: &Object, _: Sel, _calayer: ObjcId) {
-        let cw = get_cocoa_window(this);
+        let Some(cw) = get_cocoa_window(this) else { return };
         cw.send_change_event();
     }
     
     extern "C" fn dragging_session_ended_at_point_operation(this: &Object, _: Sel, _session: ObjcId, _point: NSPoint, _operation: NSDragOperation) {
-        let window = get_cocoa_window(this);
+        let Some(window) = get_cocoa_window(this) else { return };
         window.do_callback(MacosEvent::DragEnd);
     }
     
     extern "C" fn dragging_entered(this: &Object, _: Sel, sender: ObjcId) -> NSDragOperation {
-        let window = get_cocoa_window(this);
+        let Some(window) = get_cocoa_window(this) else { return NSDragOperation::None };
         window.start_live_resize();
         dragging(this, sender)
     }
@@ -644,7 +646,7 @@ pub fn define_cocoa_view_class() -> *const Class {
     
     fn dragging(this: &Object, sender: ObjcId) -> NSDragOperation {
         
-        let window = get_cocoa_window(this);
+        let Some(window) = get_cocoa_window(this) else { return NSDragOperation::None };
         let (items, pos) = get_drag_items_from_pasteboard(this, sender);
         
         /*let pos = ns_point_to_dvec2(window_point_to_view_point(this, unsafe {
@@ -677,12 +679,12 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
 
     extern "C" fn dragging_ended(this: &Object, _: Sel, _sender: ObjcId) {
-        let window = get_cocoa_window(this);
+        let Some(window) = get_cocoa_window(this) else { return };
         window.end_live_resize();
     }
     
     fn get_drag_items_from_pasteboard(this: &Object, sender: ObjcId) -> (Arc<Vec<DragItem >>, DVec2) {
-        //let window = get_cocoa_window(this);
+        //let Some(window) = get_cocoa_window(this) else { return };
         let pos = ns_point_to_dvec2(window_point_to_view_point(this, unsafe {
             msg_send![sender, draggingLocation]
         }));
@@ -746,14 +748,14 @@ pub fn define_cocoa_view_class() -> *const Class {
     }
     
     extern "C" fn perform_drag_operation(this: &Object, _: Sel, sender: ObjcId) {
-        //let window = get_cocoa_window(this);
+        //let Some(window) = get_cocoa_window(this) else { return };
         //window.end_live_resize();
         let modifiers = unsafe {
             let ns_app: ObjcId = msg_send![class!(NSApplication), sharedApplication];
             let ns_event: ObjcId = msg_send![ns_app, currentEvent];
             get_event_key_modifier(ns_event)
         };    
-        let window = get_cocoa_window(this);
+        let Some(window) = get_cocoa_window(this) else { return };
         let (items, pos) = get_drag_items_from_pasteboard(this, sender);
         window.do_callback(MacosEvent::Drop(DropEvent {
             modifiers,
@@ -766,13 +768,13 @@ pub fn define_cocoa_view_class() -> *const Class {
     /*
     extern fn draw(this: &Object, _: Sel, _calayer: id, _cgcontext: id) {
         println!("draw");
-        //let cw = get_cocoa_window(this);
+        //let Some(cw) = get_cocoa_window(this) else { return };
         //cw.send_change_event();
     }
 
     extern fn layer_will_draw(this: &Object, _: Sel, _calayer: id) {
         println!("layer_will_draw");
-        //let cw = get_cocoa_window(this);
+        //let Some(cw) = get_cocoa_window(this) else { return };
         //cw.send_change_event();
     }*/
     
