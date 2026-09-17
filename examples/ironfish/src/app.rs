@@ -24,8 +24,8 @@ live_design! {
         }
         ui: <Root>{
             main_window = <Window> {
-                window: {inner_size: vec2(1280, 1000)},
-                pass: {clear_color: #2A}
+                window: {inner_size: vec2(1280, 1000), title: "IRONFISH 芒果"},
+                pass: {clear_color: #x1A0A14}
                 block_signal_event: true;
                 body = <AppDesktop> {}
             }

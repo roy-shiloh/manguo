@@ -5,25 +5,32 @@ live_design!{
     
     DrawButton = {{DrawButton}} {
         
+        // 8-bit cell: square with a 2px bevel. Dead = dark plum, alive = hot pink,
+        // the playing column is highlighted.
         fn pixel(self) -> vec4 {
-            let sdf = Sdf2d::viewport(self.pos * self.rect_size);
-            sdf.box(1, 1, self.rect_size.x - 5, self.rect_size.y - 5, 1.5);
-            sdf.stroke_keep(mix(#xFFFFFF80, #x00000040, pow(self.pos.y, 0.2)), 1.0);
-            sdf.fill(
-                mix(
-                    mix(
-                    mix(
-                        mix(#xFFFFFF18, #xFFFDDD30, pow(length((self.pos - vec2(0.5, 0.5)) * 1.2), 1.5)), // 1st value = center, 2nd value = outer edges
-                        mix(#xFFFFFF40, #xFFFFFF20, pow(length((self.pos - vec2(0.5, 0.5)) * 1.2), 1.25)),
-                        self.hover
-                    ),
-                    mix(#xFFFDDDFF, #xFFFFFF08, pow(length((self.pos - vec2(0.5, 0.5)) * 1.2), 1.25)),
-                    // mix(#xFFFFFFFF, #xFFFFFF08, pow(length((self.pos - vec2(0.5, 0.5)) * 1.2), 1.25)),
-                    self.active
-                ),#ffffff,
-                self.active_step)
-            );
-            return sdf.result
+            let p = self.pos * self.rect_size;
+            let gap = 2.0;
+            let bw = 2.0;
+            let w = self.rect_size.x - gap;
+            let h = self.rect_size.y - gap;
+            if (p.x >= w || p.y >= h) {
+                return vec4(0.0);
+            }
+            let dead = mix(#x2B1020FF, #x3A1530FF, self.hover);
+            let alive = mix(#xE0218AFF, #xFF3FA4FF, self.hover);
+            let fill = mix(dead, alive, self.active);
+            let fill = mix(fill, mix(#x6A2A55FF, #xFFE1F0FF, self.active), self.active_step);
+            let light = mix(#xFFB3DA30, #xFFE1F0FF, self.active);
+            let dark = mix(#x0A0208CC, #x8A105AFF, self.active);
+            let on_light = step(p.x, bw) + step(p.y, bw);
+            let on_dark = step(w - bw, p.x) + step(h - bw, p.y);
+            if on_dark > 0.0 {
+                return Pal::premul(dark);
+            }
+            if on_light > 0.0 {
+                return Pal::premul(light);
+            }
+            return Pal::premul(fill);
         }
     }
     

@@ -9,9 +9,12 @@ live_design! {
     use makepad_audio_widgets::display_audio::DisplayAudio;
     use makepad_audio_widgets::piano::Piano;
 
-    FONT_SIZE_H2 = 9.5
+    FONT_SIZE_H2 = 6.5
 
     HEIGHT_AUDIOVIZ = 150
+
+    // 8-bit look: one "virtual pixel" in layout points.
+    PX = 3.0
 
     SSPACING_0 = 0.0
     SSPACING_1 = 4.0
@@ -25,43 +28,71 @@ live_design! {
     SPACING_3 = {top: (SSPACING_3), right: (SSPACING_3), bottom: (SSPACING_3), left: (SSPACING_3)}
     SPACING_4 = {top: (SSPACING_4), right: (SSPACING_4), bottom: (SSPACING_4), left: (SSPACING_4)}
     
-    H2_TEXT_BOLD = <THEME_FONT_BOLD>{
+    // Pixel font (Press Start 2P, SIL OFL).
+    PIXEL_FONT = <THEME_FONT_BOLD>{
+        font_family: {
+            latin = font("crate://self/resources/PressStart2P-Regular.ttf", 0.0, 0.0),
+        },
+        line_spacing: 1.4
+    }
+
+    H2_TEXT_BOLD = <PIXEL_FONT>{
         font_size: (FONT_SIZE_H2),
     }
     
-    H2_TEXT_REGULAR = <THEME_FONT_REGULAR>{
+    H2_TEXT_REGULAR = <PIXEL_FONT>{
         font_size: (FONT_SIZE_H2),
     }
 
-    COLOR_DOWN_FULL = #000
+    // Pink 8-bit palette
+    COLOR_BG = #x1A0A14
+    COLOR_PANEL = #x2B1020
+    COLOR_PANEL_2 = #x3A1530
+    COLOR_HOT = #xFF3FA4
+    COLOR_MAGENTA = #xE0218A
+    COLOR_PALE = #xFFB3DA
+    COLOR_HILITE = #xFFE1F0
 
-    COLOR_DOWN_0 = #x00000000
-    COLOR_DOWN_1 = #x00000011
-    COLOR_DOWN_2 = #x00000022
-    COLOR_DOWN_3 = #x00000044
-    COLOR_DOWN_4 = #x00000066
-    COLOR_DOWN_5 = #x000000AA
-    COLOR_DOWN_6 = #x000000CC
+    COLOR_DOWN_FULL = #x0A0208
 
-    COLOR_UP_0 = #xFFFFFF00
-    COLOR_UP_1 = #xFFFFFF0A
-    COLOR_UP_2 = #xFFFFFF10
-    COLOR_UP_3 = #xFFFFFF20
-    COLOR_UP_4 = #xFFFFFF40
-    COLOR_UP_5 = #xFFFFFF66
-    COLOR_UP_6 = #xFFFFFFCC
-    COLOR_UP_FULL = #xFFFFFFFF
+    COLOR_DOWN_0 = #x0A020800
+    COLOR_DOWN_1 = #x0A020822
+    COLOR_DOWN_2 = #x0A020844
+    COLOR_DOWN_3 = #x0A020866
+    COLOR_DOWN_4 = #x0A020899
+    COLOR_DOWN_5 = #x0A0208CC
+    COLOR_DOWN_6 = #x0A0208EE
 
-    COLOR_ALERT = #xFF0000FF
-    COLOR_OSC = #xFFFF99FF
-    COLOR_ENV = #xF9A894
-    COLOR_FILTER = #x88FF88
-    COLOR_FX = #x99EEFF
+    COLOR_UP_0 = #xFFB3DA00
+    COLOR_UP_1 = #xFFB3DA12
+    COLOR_UP_2 = #xFFB3DA1E
+    COLOR_UP_3 = #xFFB3DA30
+    COLOR_UP_4 = #xFFB3DA55
+    COLOR_UP_5 = #xFFB3DA99
+    COLOR_UP_6 = #xFFB3DAE6
+    COLOR_UP_FULL = #xFFE1F0FF
+
+    COLOR_ALERT = (COLOR_HOT)
+    COLOR_OSC = #xFF7AC8
+    COLOR_ENV = #xFFB3DA
+    COLOR_FILTER = #xFF3FA4
+    COLOR_FX = #xD98CFF
     COLOR_DEFAULT = (COLOR_UP_6)
 
     COLOR_VIZ_1 = (COLOR_DOWN_2)
     COLOR_VIZ_2 = (COLOR_DOWN_6)
     COLOR_DIVIDER = (COLOR_DOWN_5)
+
+    // Pixel-art assets
+    PX_MIC = dep("crate://self/resources/px/mic.png")
+    PX_CELL = dep("crate://self/resources/px/cell.png")
+    PX_SPIRAL = dep("crate://self/resources/px/spiral.png")
+    PX_CAT = dep("crate://self/resources/px/cat.png")
+    PX_SKULL = dep("crate://self/resources/px/skull.png")
+    PX_SEED = dep("crate://self/resources/px/seed.png")
+    PX_BG = dep("crate://self/resources/px/bg_hearts.png")
+    PHOTO_CAT = dep("crate://self/resources/voice_cat.jpg")
+    PHOTO_ROY = dep("crate://self/resources/voice_roy.jpg")
 
     ICO_ARP = dep("crate://self/resources/icons/Icon_Arp.svg")
     ICO_BROWSE = dep("crate://self/resources/icons/Icon_Browse.svg")
@@ -93,6 +124,90 @@ live_design! {
     ICO_UNDO = dep("crate://self/resources/icons/Icon_Undo.svg")
     ICO_UP = dep("crate://self/resources/icons/Icon_Up.svg")
 
+    // 8-BIT HELPERS
+
+    // Image resampled on a coarse virtual-pixel grid (nearest neighbour),
+    // so both pixel-art assets and photos read as chunky pixels.
+    PixelImage = <Image> {
+        fit: Smallest
+        draw_bg: {
+            instance grid: 48.0
+            instance tint: 1.0
+            fn get_color(self) -> vec4 {
+                let cell = floor(self.pos * self.grid);
+                let uv = (cell + 0.5) / self.grid;
+                let c = sample2d(self.image, uv * self.image_scale + self.image_pan);
+                // quantize to 5 levels per channel and tint pink
+                let q = floor(c.xyz * 5.0 + 0.5) / 5.0;
+                let pinked = mix(q, q * vec3(1.15, 0.85, 1.05), self.tint * 0.6);
+                return vec4(pinked, c.w);
+            }
+        }
+    }
+
+    // Small generated pixel-art icon (crisp, no tint).
+    PixelIcon = <PixelImage> {
+        width: 24, height: 24
+        draw_bg: { grid: 24.0, tint: 0.0 }
+    }
+
+    // The logo: 芒果 rendered to a texture, then rebuilt from big bevelled squares.
+    PixelLogoInner = <CachedRoundedView> {
+        width: 440,
+        height: 400,
+        margin: {top: -94}
+        align: {x: 0.5, y: 0.5}
+        draw_bg: {
+            instance cellsize: 6.0
+            instance glow: 0.0
+            fn pixel(self) -> vec4 {
+                let cs = self.cellsize;
+                let p = self.pos * self.rect_size;
+                let cell = floor(p / cs);
+                let uv = (cell + 0.5) * cs / self.rect_size;
+                let c = sample2d_rt(self.image, uv * self.scale + self.shift);
+                if c.w < 0.5 {
+                    return vec4(0.0);
+                }
+                let f = p - cell * cs;
+                let gap = 1.0;
+                if (f.x < gap || f.y < gap) {
+                    return vec4(0.0);
+                }
+                let light = step(f.x, gap + 1.0) + step(f.y, gap + 1.0);
+                let dark = step(cs - 1.0, f.x) + step(cs - 1.0, f.y);
+                let base = mix((COLOR_HOT), (COLOR_HILITE), self.glow * 0.6);
+                let col = base;
+                if dark > 0.0 {
+                    col = (COLOR_MAGENTA) * vec4(0.7, 0.7, 0.7, 1.0);
+                }
+                else if light > 0.0 {
+                    col = (COLOR_HILITE);
+                }
+                return Pal::premul(vec4(col.xyz, 1.0));
+            }
+        }
+        <Label> {
+            draw_text: {
+                text_style: <THEME_FONT_BOLD> {font_size: 150},
+                color: #fff
+            }
+            text: "芒果"
+        }
+    }
+
+    PixelLogo = <View> {
+        width: 440,
+        height: 96,
+        clip_x: true, clip_y: true,
+        logo_inner = <PixelLogoInner> {}
+    }
+
+
+    // Square-cornered RoundedView (8-bit: no rounding anywhere)
+    SquareView = <RoundedView> {
+        draw_bg: { border_radius: 0.0 }
+    }
 
     // HELPERS
     FillerH = <View> {
@@ -108,12 +223,12 @@ live_design! {
         height: Fit,
         margin: {top: (SSPACING_3), right: 0, bottom: (SSPACING_3), left: (SSPACING_0)}
         flow: Down
-            <RoundedView> {
+            <SquareView> {
             width: Fill,
             height: 1.0
             draw_bg: {color: (COLOR_DIVIDER)}
         }
-        <RoundedView> {
+        <SquareView> {
             width: Fill,
             height: 1.0
             draw_bg: {color: (COLOR_UP_4)}
@@ -137,7 +252,7 @@ live_design! {
         height: Fit
     }
 
-    SubheaderContainer = <RoundedView> {
+    SubheaderContainer = <SquareView> {
         draw_bg: {color: (COLOR_UP_2)}
         width: Fill,
         height: Fit,
@@ -167,43 +282,39 @@ live_design! {
         width: Fill,
         height: Fit
         draw_bg: {
-            instance border_width: 1.0
-            instance border_color: (COLOR_UP_FULL)
+            instance border_width: 2.0
             instance inset: vec4(1.0, 1.0, 1.0, 1.0)
-            instance radius: 2.5
-            instance dither: 1.0
-            color_1: (COLOR_UP_3),
-            color_2: (COLOR_UP_1)
-            instance border_color: #x6
-            instance border_color2: #x4
-            instance border_color3: #x3A
+            color_1: (COLOR_PANEL_2),
+            color_2: (COLOR_PANEL)
+            instance bevel_light: (COLOR_UP_4)
+            instance bevel_dark: (COLOR_DOWN_5)
 
+            // banded (posterized) vertical gradient
             fn get_color(self) -> vec4 {
-                let dither = Math::random_2d(self.pos.xy) * 0.04 * self.dither;
-                return mix(self.color_1, self.color_2, self.pos.y + dither)
+                let band = floor(self.pos.y * 6.0) / 6.0;
+                return mix(self.color_1, self.color_2, band)
             }
 
             fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                sdf.box(
-                    self.inset.x + self.border_width,
-                    self.inset.y + self.border_width,
-                    self.rect_size.x - (self.inset.x + self.inset.z + self.border_width * 2.0),
-                    self.rect_size.y - (self.inset.y + self.inset.w + self.border_width * 2.0),
-                    max(1.0, self.radius)
-                )
-                sdf.fill_keep(self.get_color())
-                if self.border_width > 0.0 {
-                    sdf.stroke(
-                        mix(
-                            mix(self.border_color, self.border_color2, clamp(self.pos.y * 10, 0, 1)),
-                            mix(self.border_color2, self.border_color3, self.pos.y),
-                            self.pos.y
-                        ),
-                        self.border_width
-                    )
+                let p = self.pos * self.rect_size;
+                let bw = self.border_width;
+                let x0 = self.inset.x;
+                let y0 = self.inset.y;
+                let x1 = self.rect_size.x - self.inset.z;
+                let y1 = self.rect_size.y - self.inset.w;
+                if (p.x < x0 || p.y < y0 || p.x >= x1 || p.y >= y1) {
+                    return vec4(0.0);
                 }
-                return sdf.result;
+                // 8-bit bevel: light on top/left, dark on bottom/right
+                let on_light = step(p.x, x0 + bw) + step(p.y, y0 + bw);
+                let on_dark = step(x1 - bw, p.x) + step(y1 - bw, p.y);
+                if on_dark > 0.0 {
+                    return Pal::premul(self.bevel_dark);
+                }
+                if on_light > 0.0 {
+                    return Pal::premul(self.bevel_light);
+                }
+                return Pal::premul(self.get_color());
             }
         }
     }
@@ -302,40 +413,21 @@ live_design! {
             instance down: 0.0
 
             fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size);
-                sdf.box(
-                    1.,
-                    1.,
-                    self.rect_size.x - 2.0,
-                    self.rect_size.y - 2.0,
-                    2.0
-                )
-
-                sdf.stroke_keep(
-                    mix(
-                        mix(
-                            mix((COLOR_UP_3), (COLOR_DOWN_4), pow(self.pos.y, .2)),
-                            mix((COLOR_UP_5), (COLOR_DOWN_4), pow(self.pos.y, 0.25)),
-                            self.hover
-                        ),
-                        mix((COLOR_DOWN_5), (COLOR_UP_3), pow(self.pos.y, 3)),
-                        self.down
-                    ),
-                    1.
-                );
-                sdf.fill(
-                    mix(
-                        mix(
-                            #FFFFFF06,
-                            #FFFFFF10,
-                            self.hover
-                        ),
-                        mix((COLOR_DOWN_4), (COLOR_DOWN_4) * 0.1, pow(self.pos.y, 0.3)),
-                        self.down
-                    )
-                );
-
-                return sdf.result
+                // NES-style button: flat fill, 2px bevel; bevel flips when pressed
+                let p = self.pos * self.rect_size;
+                let bw = 2.0;
+                let light = mix((COLOR_UP_5), (COLOR_DOWN_5), self.down);
+                let dark = mix((COLOR_DOWN_5), (COLOR_UP_5), self.down);
+                let on_light = step(p.x, bw) + step(p.y, bw);
+                let on_dark = step(self.rect_size.x - bw, p.x) + step(self.rect_size.y - bw, p.y);
+                if on_dark > 0.0 {
+                    return Pal::premul(dark);
+                }
+                if on_light > 0.0 {
+                    return Pal::premul(light);
+                }
+                let fill = mix(mix((COLOR_PANEL_2), (COLOR_MAGENTA), self.hover * 0.5), (COLOR_HOT), self.down);
+                return Pal::premul(fill);
             }
         }
 
@@ -358,54 +450,40 @@ live_design! {
             },
         }
         draw_bg: {
-            instance line_color: #f00
+            instance line_color: (COLOR_HOT)
             instance bipolar: 0.0
             fn pixel(self) -> vec4 {
-                let nub_size = 3
+                // 8-bit slider: square trough, blocky fill bar, square nub
+                let px = (PX);
+                let p = floor(self.pos * self.rect_size / px) * px;
+                let top = 21.0;
+                let w = self.rect_size.x;
+                let h = self.rect_size.y;
+                let sdf = Sdf2d::viewport(p);
 
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                let top = 20.0;
+                // trough
+                sdf.rect(px, top, w - 2.0 * px, h - top - px);
+                sdf.fill_keep(mix((COLOR_DOWN_4), (COLOR_DOWN_6), self.drag));
+                // bevel: dark top edge, light bottom edge (sunken)
+                sdf.rect(px, top, w - 2.0 * px, px);
+                sdf.fill((COLOR_DOWN_6));
+                sdf.rect(px, h - 2.0 * px, w - 2.0 * px, px);
+                sdf.fill((COLOR_UP_3));
 
-                sdf.box(1.0, top, self.rect_size.x - 2, self.rect_size.y - top - 2, 1);
-                sdf.fill_keep(
-                    mix(
-                        mix((COLOR_DOWN_4), (COLOR_DOWN_4) * 0.1, pow(self.pos.y, 1.0)),
-                        mix((COLOR_DOWN_4) * 1.75, (COLOR_DOWN_4) * 0.1, pow(self.pos.y, 1.0)),
-                        self.drag
-                    )
-                ) // Control backdrop gradient
+                // value bar, from origin (left or centre when bipolar) to nub
+                let inner = w - 4.0 * px;
+                let origin = mix(2.0 * px, w * 0.5, self.bipolar);
+                let nub_x = 2.0 * px + self.slide_pos * (inner - 3.0 * px);
+                let bar_x0 = min(origin, nub_x);
+                let bar_x1 = max(origin, nub_x + 3.0 * px);
+                sdf.rect(bar_x0, top + 2.0 * px, bar_x1 - bar_x0, h - top - 4.0 * px);
+                sdf.fill(mix(self.line_color * 0.8, self.line_color, self.hover + self.drag));
 
-                sdf.stroke(mix(mix(#x00000060, #x00000070, self.drag), #xFFFFFF10, pow(self.pos.y, 10.0)), 1.0) // Control outline
-                let in_side = 5.0;
-                let in_top = 5.0; // Ridge: vertical position
-                sdf.rect(1.0 + in_side, top + in_top, self.rect_size.x - 2 - 2 * in_side, 3);
-                sdf.fill(mix((COLOR_DOWN_4), #00000088, self.drag)); // Ridge color
-                let in_top = 7.0;
-                sdf.rect(1.0 + in_side, top + in_top, self.rect_size.x - 2 - 2 * in_side, 3);
-                sdf.fill(#FFFFFF18); // Ridge: Rim light catcher
-
-                let nub_x = self.slide_pos * (self.rect_size.x - nub_size - in_side * 2 - 9);
-                sdf.move_to(mix(in_side + 3.5, self.rect_size.x * 0.5, self.bipolar), top + in_top);
-
-                sdf.line_to(nub_x + in_side + nub_size * 0.5, top + in_top);
-                sdf.stroke_keep(mix((COLOR_UP_0), self.line_color, self.drag), 1.5)
-                sdf.stroke(
-                    mix(mix(self.line_color * 0.85, self.line_color, self.hover), #xFFFFFF80, self.drag),
-                    1
-                )
-
-                let nub_x = self.slide_pos * (self.rect_size.x - nub_size - in_side * 2 - 3) - 3;
-                sdf.box(nub_x + in_side, top + 1.0, 12, 12, 1.)
-
-                sdf.fill_keep(mix(mix(#x7, #x8, self.hover), #3, self.pos.y)); // Nub background gradient
-                sdf.stroke(
-                    mix(
-                        mix(#xa, #xC, self.hover),
-                        #0,
-                        pow(self.pos.y, 1.5)
-                    ),
-                    1.
-                ); // Nub outline gradient
+                // nub: 3px-wide raised block
+                sdf.rect(nub_x, top + px, 3.0 * px, h - top - 2.0 * px);
+                sdf.fill_keep(mix((COLOR_PALE), (COLOR_HILITE), self.hover));
+                sdf.rect(nub_x + 2.0 * px, top + px, px, h - top - 2.0 * px);
+                sdf.fill((COLOR_MAGENTA));
 
                 return sdf.result
             }
@@ -450,32 +528,28 @@ live_design! {
                 instance border_color2: #xFFFFFF0A
                 size: 8.5;
                 fn pixel(self) -> vec4 {
-                    //return
-                    let sdf = Sdf2d::viewport(self.pos * self.rect_size)
+                    // 8-bit toggle: square track, square knob that slides in one step
+                    let px = (PX);
+                    let sdf = Sdf2d::viewport(floor(self.pos * self.rect_size / px) * px)
                     let sz = self.size;
-                    let left = sz + 1.;
-                    let c = vec2(left + sz, self.rect_size.y * 0.5);
-                    sdf.box(left, c.y - sz, sz * 3.0, sz * 2.0, 0.5 * sz);
-
-                    sdf.stroke_keep(
-                        mix(self.border_color, self.border_color2, clamp(self.pos.y - 0.2, 0, 1)),
-                        self.border_width
-                    )
-
-                    sdf.fill(
-                        mix(
-                            mix((COLOR_DOWN_4), (COLOR_DOWN_4) * 0.1, pow(self.pos.y, 1.0)),
-                            mix((COLOR_DOWN_4) * 1.75, (COLOR_DOWN_4) * 0.1, pow(self.pos.y, 1.0)),
-                            self.hover
-                        )
-                    )
-                    let isz = sz * 0.65;
-                    sdf.circle(left + sz + self.active * sz, c.y - 0.5, isz);
-                    sdf.circle(left + sz + self.active * sz, c.y - 0.5, 0.425 * isz);
-                    sdf.subtract();
-                    sdf.circle(left + sz + self.active * sz, c.y - 0.5, isz);
-                    sdf.blend(self.active)
-                    sdf.fill(mix(#xFFF8, #xFFFC, self.hover));
+                    let left = px;
+                    let cy = self.rect_size.y * 0.5;
+                    let tw = sz * 3.0;
+                    let th = sz * 2.0;
+                    sdf.rect(left, cy - sz, tw, th);
+                    sdf.fill(mix((COLOR_DOWN_5), (COLOR_MAGENTA), self.active));
+                    // bevel
+                    sdf.rect(left, cy - sz, tw, px);
+                    sdf.fill((COLOR_DOWN_6));
+                    sdf.rect(left, cy + sz - px, tw, px);
+                    sdf.fill((COLOR_UP_3));
+                    // knob
+                    let kw = sz * 1.3;
+                    let kx = left + px + self.active * (tw - kw - 2.0 * px);
+                    sdf.rect(kx, cy - sz + px, kw, th - 2.0 * px);
+                    sdf.fill(mix((COLOR_PALE), (COLOR_HILITE), self.hover));
+                    sdf.rect(kx + kw - px, cy - sz + px, px, th - 2.0 * px);
+                    sdf.fill((COLOR_DOWN_5));
                     return sdf.result
                 }
             }
@@ -496,7 +570,7 @@ live_design! {
         }
     }
 
-    GraphPaper = <RoundedView> {
+    GraphPaper = <SquareView> {
         width: Fill,
         height: 120
         draw_bg: {
@@ -510,13 +584,15 @@ live_design! {
             instance release: 0.2
 
             fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size); //mod (self.pos * self.rect_size, 15))
-                let base_color = mix(self.color, self.color2, pow(length((self.pos - vec2(0.5, 0.5)) * 1.2), 2.0));
-                let darker = base_color * 0.85;
-                let pos = self.pos * self.rect_size;
-                sdf.clear(mix(base_color, darker, pow(abs(sin(pos.x * 0.5)), 24) + pow(abs(sin(pos.y * 0.5)), 32.0))); // Grid
-                sdf.rect(1.0, 1.0, 16, 16)
-                sdf.stroke(darker, 1)
+                let px = (PX);
+                let pos = floor(self.pos * self.rect_size / px) * px;
+                let sdf = Sdf2d::viewport(pos);
+                let base_color = (COLOR_DOWN_4);
+                let darker = (COLOR_MAGENTA) * 0.35;
+                // 8-bit graph paper: a grid line every 4 virtual pixels
+                let gx = step(mod(pos.x, px * 4.0), px * 0.5);
+                let gy = step(mod(pos.y, px * 4.0), px * 0.5);
+                sdf.clear(mix(base_color, darker, clamp(gx + gy, 0.0, 1.0)));
                 let pad_b = 8
                 let pad_s = 8
                 let width = self.rect_size.x - 2 * pad_s
@@ -530,17 +606,14 @@ live_design! {
                 sdf.line_to(pad_s + width * ((self.attack + self.decay + self.hold) / total), sustain)
                 sdf.line_to(pad_s + width * (1.0 - self.release / total), sustain)
                 sdf.line_to(pad_s + width, self.rect_size.y - pad_b)
-                sdf.stroke_keep(#xFFC49910, 8.0);
-                sdf.stroke_keep(#xFFC49910, 6.0);
-                sdf.stroke_keep(#xFFC49920, 4.0);
-                sdf.stroke_keep(#xFFC49980, 2.0);
-                sdf.stroke(#xFFFFFFFF, 1.0);
+                sdf.stroke_keep((COLOR_MAGENTA), px * 2.0);
+                sdf.stroke((COLOR_HILITE), px);
                 return sdf.result
             }
         }
     }
 
-    FishTitle = <RoundedView> {
+    FishTitle = <SquareView> {
         width: Fit,
         height: Fit,
         margin: {bottom: (SSPACING_1)}
@@ -555,7 +628,7 @@ live_design! {
         }
     }
 
-    FishHeader = <RoundedView> {
+    FishHeader = <SquareView> {
         flow: Right
         height: Fit,
         width: Fill,
@@ -658,38 +731,17 @@ live_design! {
                     let sz = self.rect_size.x;
                     let c = vec2(self.rect_size.x, self.rect_size.y);
                     let pad = 0.35;
-                    sdf.box(
-                        0.,
-                        0.,
-                        self.rect_size.x,
-                        self.rect_size.y,
-                        4.0
-                    )
+                    sdf.rect(0., 0., self.rect_size.x, self.rect_size.y)
 
                     sdf.fill_keep(
                         mix(
-                            mix(
-                                mix(#xFFFFFF20, #xFFFFFF08, pow(length((self.pos - vec2(0.5, 0.5)) * 1.75), 1.25)),
-                                mix(#xFFFFFF40, #xFFFFFF10, pow(length((self.pos - vec2(0.5, 0.5)) * 1.75), 1.25)),
-                                self.hover
-                            ),
-                            mix(
-                                mix(#x9C9C64FF, #x00000088, pow(length((self.pos - vec2(0.5, 0.5)) * 1.4), 1.25)),
-                                mix(#x9C9C64FF, #x00000088, pow(length((self.pos - vec2(0.5, 0.5)) * 1.75), 1.25)),
-                                self.hover
-                            ),
+                            mix((COLOR_PANEL_2), (COLOR_MAGENTA), self.hover * 0.5),
+                            (COLOR_HOT),
                             self.active
                         )
                     )
 
-                    sdf.stroke_keep(
-                        mix(
-                            mix((COLOR_UP_5), (COLOR_DOWN_4), pow(self.pos.y, .2)),
-                            mix((COLOR_DOWN_5), (COLOR_UP_3), pow(self.pos.y, 3)),
-                            self.active
-                        ),
-                        1.5
-                    );
+                    sdf.stroke_keep(mix((COLOR_UP_4), (COLOR_HILITE), self.active), 2.0);
 
                     sdf.subtract()
 
@@ -701,17 +753,7 @@ live_design! {
                     sdf.line_to(0.0 + padx, c.y - pady);
                     sdf.close_path();
 
-                    sdf.fill_keep(
-                        mix(
-                            mix(
-                                #fff6,
-                                #ffff,
-                                self.hover
-                            ),
-                            #fff,
-                            self.active
-                        )
-                    )
+                    sdf.fill_keep(mix((COLOR_PALE), (COLOR_HILITE), self.hover + self.active))
 
                     return sdf.result
                 }
@@ -729,21 +771,9 @@ live_design! {
 
                 let c = vec2(left + sz, self.rect_size.y * 0.5 - 2.0);
 
-                sdf.box(left, c.y - sz, sz * 2.5, sz * 2.5, 2.0); // 3rd parameter == corner radius
-                sdf.fill_keep(mix(
-                    mix((COLOR_DOWN_4), (COLOR_DOWN_2), self.pos.y),
-                    mix((COLOR_DOWN_5), (COLOR_DOWN_3), self.pos.y),
-                    self.active
-                ))
-
-                sdf.stroke(
-                    mix(
-                        mix((COLOR_DOWN_5), (COLOR_UP_3), pow(self.pos.y, 2)),
-                        mix((COLOR_DOWN_6), (COLOR_UP_4), pow(self.pos.y, 1.5)),
-                        self.hover
-                    ),
-                    1.0
-                ) // outline
+                sdf.rect(left, c.y - sz, sz * 2.5, sz * 2.5);
+                sdf.fill_keep(mix((COLOR_DOWN_4), (COLOR_MAGENTA), self.active))
+                sdf.stroke(mix((COLOR_UP_3), (COLOR_UP_5), self.hover), 2.0) // outline
 
                 let szs = sz * 0.5;
                 let dx = 1.0;
@@ -754,19 +784,7 @@ live_design! {
                 sdf.line_to(c.x + offset, c.y + szs + offset);
                 sdf.line_to(c.x + szs + offset, c.y - szs + offset);
 
-                sdf.stroke_keep(mix(
-                    mix(
-                        #fff0,
-                        #fff2,
-                        self.hover
-                    ),
-                    mix(
-                        (COLOR_UP_5),
-                        (COLOR_UP_6),
-                        self.hover
-                    ),
-                    self.active
-                ), 1.75);
+                sdf.stroke_keep(mix((COLOR_UP_0), (COLOR_HILITE), self.active), 2.0);
 
                 return sdf.result
             }
@@ -793,24 +811,11 @@ live_design! {
         text: "Search"
         
         draw_bg: {
-            instance radius: 3.0
-            instance border_width: 0.0
-            instance border_color: #3
-            instance inset: vec4(0.0, 0.0, 0.0, 0.0)
-
             fn pixel(self) -> vec4 {
                 let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                sdf.box(
-                    self.inset.x + self.border_width,
-                    self.inset.y + self.border_width,
-                    self.rect_size.x - (self.inset.x + self.inset.z + self.border_width * 2.0),
-                    self.rect_size.y - (self.inset.y + self.inset.w + self.border_width * 2.0),
-                    max(1.0, self.radius)
-                )
-
-                sdf.fill_keep(mix((COLOR_DOWN_3), (COLOR_DOWN_1), pow(self.pos.y, 0.5)))
-                sdf.stroke(mix((COLOR_UP_0), (COLOR_UP_3), pow(self.pos.y, 4.0)), 1.0)
-
+                sdf.rect(0.0, 0.0, self.rect_size.x, self.rect_size.y)
+                sdf.fill_keep((COLOR_DOWN_4))
+                sdf.stroke((COLOR_UP_3), 2.0)
                 return sdf.result;
             }
         },
@@ -849,8 +854,8 @@ live_design! {
 
                 sdf.fill_keep(
                     mix(
-                        mix(#141414, #444, self.hover),
-                        mix(#888, #CCC, self.hover),
+                        mix((COLOR_DOWN_4), (COLOR_UP_3), self.hover),
+                        mix((COLOR_MAGENTA), (COLOR_HOT), self.hover),
                         self.active
                     )
                 )
@@ -867,7 +872,7 @@ live_design! {
 
 
     // PANELS
-    EnvelopePanel = <RoundedView> {
+    EnvelopePanel = <SquareView> {
         flow: Down,
         padding: <SPACING_0> {}
         width: Fill,
@@ -1117,7 +1122,7 @@ live_design! {
         }
     }
 
-    SequencerPanel = <RoundedView> {
+    SequencerPanel = <SquareView> {
         flow: Down
         margin: <SPACING_0> {}
 
@@ -1142,48 +1147,15 @@ live_design! {
                 }
             }
 
-            <GradientYView> {
+            <FishPanel> {
                 height: Fit
                 flow: Down
+                padding: <SPACING_0> {}
                 draw_bg: {
-                    instance border_width: 1.0
-                    instance border_color: #ffff
-                    instance inset: vec4(1.0, 1.0, 1.0, 1.0)
-                    instance radius: 2.5
-                    instance dither: 1.0
-                    color_1: (#x00000008),
-                    color_2: (#x0004)
-                    instance border_color: #x1A
-                    instance border_color2: #x28
-                    instance border_color3: #x50
-
-                    fn get_color(self) -> vec4 {
-                        let dither = Math::random_2d(self.pos.xy) * 0.04 * self.dither;
-                        return mix(self.color_1, self.color_2, pow(self.pos.y, 0.5) + dither)
-                    }
-
-                    fn pixel(self) -> vec4 {
-                        let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                        sdf.box(
-                            self.inset.x + self.border_width,
-                            self.inset.y + self.border_width,
-                            self.rect_size.x - (self.inset.x + self.inset.z + self.border_width * 2.0),
-                            self.rect_size.y - (self.inset.y + self.inset.w + self.border_width * 2.0),
-                            max(1.0, self.radius)
-                        )
-                        sdf.fill_keep(self.get_color())
-                        if self.border_width > 0.0 {
-                            sdf.stroke(
-                                mix(
-                                    mix(self.border_color, self.border_color2, clamp(self.pos.y * 10, 0, 1)),
-                                    mix(self.border_color2, self.border_color3, self.pos.y),
-                                    self.pos.y
-                                ),
-                                self.border_width
-                            )
-                        }
-                        return sdf.result;
-                    }
+                    color_1: (COLOR_DOWN_3),
+                    color_2: (COLOR_DOWN_4)
+                    bevel_light: (COLOR_DOWN_5)
+                    bevel_dark: (COLOR_UP_3)
                 }
 
                 <View> {
@@ -1535,14 +1507,14 @@ live_design! {
                                 return mix(
                                     mix(
                                         mix(
-                                            (#x0008),
-                                            (#x0008),
+                                            (COLOR_PALE),
+                                            (COLOR_PALE),
                                             self.focus
                                         ),
-                                        (#x000F),
+                                        (COLOR_HILITE),
                                         self.hover
                                     ),
-                                    (#x000A),
+                                    (COLOR_HOT),
                                     self.down
                                 )
                             }
@@ -1561,7 +1533,7 @@ live_design! {
                                 sdf.line_to(c.x, c.y + sz * 0.75);
                                 sdf.close_path();
 
-                                sdf.fill(mix(#000A, #000F, self.hover));
+                                sdf.fill(mix((COLOR_PALE), (COLOR_HILITE), self.hover));
 
                                 return sdf.result
                             }
@@ -1868,12 +1840,13 @@ live_design! {
             align: {x: 0.0, y: 0.0}
             spacing: 0,
             padding: <SPACING_2> {}
-            height: 135,
+            height: 150,
             width: Fill,
             margin: <SPACING_2> {}
 
             <View> {
                 width: Fill
+                height: Fit
                 flow: Right,
                 align: {x: 0.0, y: 0.0}
 
@@ -1889,14 +1862,15 @@ live_design! {
                         text: "Preset"
                     }
                     <View>{
-                        preset_1 = <Button>{text:"1"}
-                        preset_2 = <Button>{text:"2"}
-                        preset_3 = <Button>{text:"3"}
-                        preset_4 = <Button>{text:"4"}
-                        preset_5 = <Button>{text:"5"}
-                        preset_6 = <Button>{text:"6"}
-                        preset_7 = <Button>{text:"7"}
-                        preset_8 = <Button>{text:"8"}
+                        width: Fit, height: Fit, flow: Right, spacing: 2
+                        preset_1 = <FishButton>{text:"1", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_2 = <FishButton>{text:"2", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_3 = <FishButton>{text:"3", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_4 = <FishButton>{text:"4", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_5 = <FishButton>{text:"5", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_6 = <FishButton>{text:"6", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_7 = <FishButton>{text:"7", width: 24, height: 24, padding: 0, margin: {right: 2}}
+                        preset_8 = <FishButton>{text:"8", width: 24, height: 24, padding: 0, margin: {right: 2}}
                     }
                         
                     
@@ -1908,12 +1882,7 @@ live_design! {
                     spacing: (SSPACING_1)
                 }
 
-                <Image> {
-                    source: dep("crate://self/resources/tinrs.png"),
-                    width: (1000 * 0.175),
-                    height: (175 * 0.175),
-                    margin: 0
-                }
+                logo = <PixelLogo> {}
 
             }
 
@@ -2073,7 +2042,7 @@ live_design! {
         show_bg: true,
         draw_bg:{
             fn pixel(self)->vec4{
-                return #2a
+                return (COLOR_BG)
             }
         }
         <View> {
@@ -2093,6 +2062,27 @@ live_design! {
                     width: Fill
                     draw_wave: {
                         fn vu_fill(self) -> vec4 {return #0000}
+                        // 8-bit oscilloscope: waveform quantized to PX-sized blocks, pink ramp
+                        fn pixel(self) -> vec4 {
+                            let px = (PX);
+                            let qpos = floor(self.pos * self.rect_size / px) * px;
+                            let sdf = Sdf2d::viewport(qpos);
+                            let step = 0.0;
+                            let half = self.rect_size.y * 0.5;
+                            for i in 0..4 {
+                                let wave = sample2d(self.wave_texture, vec2(qpos.x / self.rect_size.x, step));
+                                let right = (wave.y + wave.z / 256.0 - 0.5) * 3.0;
+                                let left = (wave.w + wave.x / 256.0 - 0.5) * 3.0;
+                                let audio = floor(((left + right) - 0.01) * half / px) * px / half;
+                                let thick = abs(audio) * half * 2.0;
+                                sdf.hline(half + audio * half * 2.0, max(thick, px) * step(0.001, thick));
+                                let t = step * 4.0;
+                                let color = mix((COLOR_HOT), (COLOR_FX), t) * (1.0 - t * 0.5);
+                                sdf.fill_premul(vec4(color.xyz, 0.0))
+                                step += 1.0 / 16.0;
+                            }
+                            return sdf.result
+                        }
                     }
                 }
             }
