@@ -10,4 +10,3 @@ pub use makepad_widgets::makepad_draw;
 pub mod app;
 mod sequencer;
 mod app_desktop;
-mod app_mobile;

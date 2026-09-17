@@ -1,10 +1,4 @@
-
-use {
-    crate::{
-        makepad_draw::*,
-        makepad_widgets::*,
-    }
-};
+use crate::makepad_widgets::*;
 
 live_design!{
     use link::shaders::*;

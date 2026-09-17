@@ -3,151 +3,15 @@ use crate::{
     makepad_audio_widgets::piano::*, makepad_synth_ironfish::ironfish::*, makepad_widgets::*,
     sequencer::*,
 };
-//use std::fs::File;
-//use std::io::prelude::*;
+
 live_design! {
     use link::widgets::*
     use link::theme::*
     use makepad_example_ironfish::app_desktop::AppDesktop
-    use makepad_example_ironfish::app_mobile::AppMobile
 
     use makepad_audio_graph::mixer::Mixer;
     use makepad_audio_graph::instrument::Instrument;
     use makepad_synth_ironfish::ironfish::IronFish;
-    
-    use makepad_draw::shader::std::*;
-/*
-    BlurStage = <ViewBase> {
-        optimize: Texture,
-        draw_bg: {
-            texture image: texture2d
-
-            uniform blursize: 0.0,
-            uniform blurstd: 0.0,
-            uniform blurx: 1.0,
-            uniform blury: 0.0,
-            varying g1: float,
-            varying g2: float,
-            varying g3: float,
-            varying g4: float,
-            varying g5: float,
-
-            varying gaussscale: float,
-
-            varying o0: vec2,
-
-            varying o1a: vec2,
-            varying o2a: vec2,
-            varying o3a: vec2,
-            varying o4a: vec2,
-            varying o5a: vec2,
-
-            varying o1b: vec2,
-            varying o2b: vec2,
-            varying o3b: vec2,
-            varying o4b: vec2,
-            varying o5b: vec2,
-
-            fn vertex(self) -> vec4
-            {
-                let x = self.blurx;
-                let y = self.blury;
-
-                let offset = 0.003 * self.blursize / max(x,y);
-                let standard_deviation = 0.0001 + self.blurstd *0.003;
-                let st_dev_sqr = standard_deviation * standard_deviation;
-
-                let off1 = offset;
-                let off2 = 2.0*offset;
-                let off3 = 3.0*offset;
-                let off4 = 4.0*offset;
-                let off5 = 5.0*offset;
-
-                let mainscale = (1.0 / sqrt(2*PI*st_dev_sqr));
-                let stddevscale = 1.0/ (2*st_dev_sqr);
-
-                self.g1 =  pow(E, -((off1*off1)* stddevscale));
-                self.g2 =  pow(E, -((off2*off2)* stddevscale));
-                self.g3 =  pow(E, -((off3*off3)* stddevscale));
-                self.g4 =  pow(E, -((off4*off4)* stddevscale));
-                self.g5 =  pow(E, -((off5*off5)* stddevscale));
-
-                self.gaussscale = 1.0/(1.0 +  (self.g1 + self.g2 + self.g3 + self.g4 + self.g5 )*2.0);
-
-                let pos = self.clip_and_transform_vertex(self.rect_pos, self.rect_size);
-                self.o0 = self.pos;
-
-                self.o1a = self.o0 + vec2(off1*x,off1*y);
-                self.o2a = self.o0 + vec2(off2*x,off2*y);
-                self.o3a = self.o0 + vec2(off3*x,off3*y);
-                self.o4a = self.o0 + vec2(off4*x,off4*y);
-                self.o5a = self.o0 + vec2(off5*x,off5*y);
-
-                self.o1b = self.o0 - vec2(off1*x,off1*y);
-                self.o2b = self.o0 - vec2(off2*x,off2*y);
-                self.o3b = self.o0 - vec2(off3*x,off3*y);
-                self.o4b = self.o0 - vec2(off4*x,off4*y);
-                self.o5b = self.o0 - vec2(off5*x,off5*y);
-
-                return pos;
-            }
-
-            fn pixel(self) -> vec4{
-                let col = sample2d(self.image, self.o0) ;
-                col +=  (sample2d(self.image, self.o1a) + sample2d(self.image, self.o1b)) * self.g1;
-                col +=  (sample2d(self.image, self.o2a) + sample2d(self.image, self.o2b)) * self.g2 ;
-                col +=  (sample2d(self.image, self.o3a) + sample2d(self.image, self.o3b)) * self.g3 ;
-                col +=  (sample2d(self.image, self.o4a) + sample2d(self.image, self.o4b)) * self.g4 ;
-                col +=  (sample2d(self.image, self.o5a) + sample2d(self.image, self.o5b)) * self.g5 ;
-                col = col * self.gaussscale;
-
-                return col ;
-            }
-        }
-    }
-
-
-    ShadowStage = <ViewBase> {
-        optimize: Texture,
-        draw_bg: {
-            texture image: texture2d
-
-            uniform shadowopacity:  0.9,
-            uniform shadowx: 1.0,
-            uniform shadowy: 1.0,
-
-            varying o0: vec2,
-            varying oShadow: vec2,
-            
-            fn vertex(self) -> vec4
-            {
-                
-                let dpi = self.dpi_factor;
-                
-               
-                let pos = self.clip_and_transform_vertex(self.rect_pos, self.rect_size);
-
-                self.o0 = self.pos;
-                self.oShadow = self.pos - vec2(self.shadowx * dpi, self.shadowy * dpi)*0.001;
-
-                return pos;
-            }
-
-            fn pixel(self) -> vec4{
-                
-                let shadow = sample2d(self.image, self.oShadow);
-                let main = sample2d(self.image, self.o0);
-
-                let col =  (vec4(0.0,0.0,0.0,self.shadowopacity)  * shadow.a ) * ( 1 - main.a) + main;
-
-                //col +=  (sample2d(self.image, self.o0) )*0.3;
-                
-
-                return col;
-            }
-        }
-    }
-*/
 
     App = {{App}} {
 
@@ -163,62 +27,17 @@ live_design! {
                 window: {inner_size: vec2(1280, 1000)},
                 pass: {clear_color: #2A}
                 block_signal_event: true;
-                /*body2 = <View>{
-                    step4 = <BlurStage>{
-                        width: Fill,
-                        height: Fill,
-                        draw_bg:{blury: 0.0, blurx: 10.0}
-                        step3 = <BlurStage>{
-                            width: Fill,
-                            height: Fill,
-                            draw_bg:{blury: 10.0, blurx: 0.0}
-                            step2 = <BlurStage>{
-                                width: Fill,
-                                height: Fill,
-                                draw_bg:{blury: 7.07, blurx: 7.07}
-                                step1 = <BlurStage>{
-                                    width: Fill,
-                                    height: Fill,
-                                    draw_bg:{blury: -7.07, blurx: 7.07}
-                                    <AppDesktop> {}
-                                }
-                            }
-                        }
-                    }
-                }*/
                 body = <AppDesktop> {}
-                /*<View>
-                {
-                    
-                    width: Fill,
-                    height: Fill,
-                    
-                    shadowstep = <ShadowStage> {
-                        width: Fill,
-                        height: Fill,
-                        draw_bg:{shadowy: 10.0, shadowx: 10.0, shadowopacity: 2.0}
-                        padding: 10
-                        <AppDesktop> {}
-                    }
-                }*/
             }
         }
     }
 }
 app_main!(App);
 
-pub struct SynthPreset {
-    pub id: LiveId,
-    pub name: String,
-    pub fav: bool,
-}
-
 #[derive(Live)]
 pub struct App {
     #[live]
     ui: WidgetRef,
-    #[rust]
-    _presets: Vec<SynthPreset>,
     #[live]
     audio_graph: AudioGraph,
     #[rust]
@@ -232,7 +51,6 @@ impl LiveRegister for App {
         crate::makepad_synth_ironfish::live_design(cx);
         crate::sequencer::live_design(cx);
         crate::app_desktop::live_design(cx);
-        crate::app_mobile::live_design(cx);
     }
 }
 
@@ -318,8 +136,6 @@ impl App {
         // Osc1 panel
         db.bind(id!(supersaw1.spread), ids!(osc1.supersaw.spread.slider));
         db.bind(id!(supersaw1.diffuse), ids!(osc1.supersaw.diffuse.slider));
-        db.bind(id!(supersaw1.spread), ids!(osc1.supersaw.spread.slider));
-        db.bind(id!(supersaw1.diffuse), ids!(osc1.supersaw.diffuse.slider));
         db.bind(id!(supersaw1.spread), ids!(osc1.hypersaw.spread.slider));
         db.bind(id!(supersaw1.diffuse), ids!(osc1.hypersaw.diffuse.slider));
 
@@ -333,8 +149,6 @@ impl App {
         // Osc2 panel
         db.bind(id!(supersaw2.spread), ids!(osc2.supersaw.spread.slider));
         db.bind(id!(supersaw2.diffuse), ids!(osc2.supersaw.diffuse.slider));
-        db.bind(id!(supersaw2.spread), ids!(osc2.supersaw.spread.slider));
-        db.bind(id!(supersaw2.diffuse), ids!(osc2.supersaw.diffuse.slider));
         db.bind(id!(supersaw2.spread), ids!(osc2.hypersaw.spread.slider));
         db.bind(id!(supersaw2.diffuse), ids!(osc2.hypersaw.diffuse.slider));
 
@@ -344,16 +158,6 @@ impl App {
         db.bind(id!(osc2.harmonic), ids!(osc2.harmonicshift.slider));
         db.bind(id!(osc2.harmonicenv), ids!(osc2.harmonicenv.slider));
         db.bind(id!(osc2.harmoniclfo), ids!(osc2.harmoniclfo.slider));
-
-        db.bind(id!(blur.size), ids!(blursize.slider));
-        db.bind(id!(blur.std), ids!(blurstd.slider));
-
-
-
-
-        db.bind(id!(shadow.opacity), ids!(shadowopacity.slider));
-        db.bind(id!(shadow.x), ids!(shadowx.slider));
-        db.bind(id!(shadow.y), ids!(shadowy.slider));
 
         // sequencer
         db.bind(id!(sequencer.steps), ids!(sequencer));
@@ -427,19 +231,6 @@ impl App {
             ids!(vol_env.display, draw_bg.release),
             |v| v,
         );
-
-        /*db.apply(id!(shadow.opacity), ids!(shadowstep, draw_bg.shadowopacity), |v| v);
-        db.apply(id!(shadow.x), ids!(shadowstep, draw_bg.shadowx), |v| v);
-        db.apply(id!(shadow.y), ids!(shadowstep, draw_bg.shadowy), |v| v);
-
-        db.apply(id!(blur.size), ids!(step1, draw_bg.blursize), |v| v);
-        db.apply(id!(blur.std), ids!(step1, draw_bg.blurstd), |v| v);
-        db.apply(id!(blur.size), ids!(step2, draw_bg.blursize), |v| v);
-        db.apply(id!(blur.std), ids!(step2, draw_bg.blurstd), |v| v);
-        db.apply(id!(blur.size), ids!(step3, draw_bg.blursize), |v| v);
-        db.apply(id!(blur.std), ids!(step3, draw_bg.blurstd), |v| v);
-        db.apply(id!(blur.size), ids!(step4, draw_bg.blursize), |v| v);
-        db.apply(id!(blur.std), ids!(step4, draw_bg.blurstd), |v| v);*/
     }
 }
 
@@ -466,22 +257,6 @@ impl MatchEvent for App {
                 ids!(preset_pages.tab1_frame, preset_pages.tab2_frame,),
             );
 
-        ui.radio_button_set(ids!(
-            mobile_modes.tab1,
-            mobile_modes.tab2,
-            mobile_modes.tab3,
-        ))
-        .selected_to_visible(
-            cx,
-            &ui,
-            actions,
-            ids!(
-                application_pages.tab1_frame,
-                application_pages.tab2_frame,
-                application_pages.tab3_frame,
-            ),
-        );
-
         for note in piano.notes_played(&actions) {
             self.audio_graph.send_midi_data(
                 MidiNote {
@@ -495,13 +270,11 @@ impl MatchEvent for App {
         }
 
         if ui.button_set(ids!(panic)).clicked(&actions) {
-            //log!("hello world");
             cx.midi_reset();
             self.audio_graph.all_notes_off();
         }
 
         let sequencer = ui.sequencer(id!(sequencer));
-        // lets fetch and update the tick.
 
         if ui.button_set(ids!(clear_grid)).clicked(&actions) {
             sequencer.clear_grid(cx);
@@ -523,11 +296,8 @@ impl MatchEvent for App {
         let mut db = DataBindingStore::new();
         db.data_bind(cx, actions, &ui, Self::data_bind);
 
-        
+
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
-
-        //sequencer.set_step(ironfish.sequencer);
-
         ironfish.settings.apply_over(cx, &db.nodes);
     }
 
@@ -582,7 +352,6 @@ impl App{
                     nodes.from_cbor(&data).unwrap();
                     ironfish.settings.apply_over(cx, &nodes);
                     self.init_ui_state(cx);
-                    //self.imgui.root_frame().bind_read(cx, &nodes);
                 }
                 else {
                     log!("Error decompressing preset");

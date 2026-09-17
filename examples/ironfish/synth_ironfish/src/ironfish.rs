@@ -80,31 +80,6 @@ pub enum FilterType {
     BandPass,
     BandReject,
 }
-/*
-struct LaddFilterCoefficients {
-    k: f64,
-    alpha: f64,
-    alpha0: f64,
-    sigma: f64,
-    bass_comp: f64,
-    g: f64,
-    subfilter_beta: [f64; 4]
-}
-
-impl Default for LaddFilterCoefficients {
-    fn default() -> Self {
-        Self {
-            k: 1.0,
-            alpha: 0.0,
-            alpha0: 1.0,
-            sigma: 1.0,
-            bass_comp: 1.0,
-            g: 1.0,
-
-            subfilter_beta: [0.0, 0.0, 0.0, 0.0]
-        }
-    }
-}*/
 
 #[derive(Live, LiveHook, LiveRegister, LiveAtomic, Debug, LiveRead, Clone)]
 pub struct OscSettings {
@@ -197,26 +172,6 @@ pub struct BitCrushSettings {
     #[live(0.4)]
     amount: f32a,
 }
-
-#[derive(Live, LiveHook, LiveRegister, LiveAtomic, Debug, LiveRead)]
-pub struct BlurSettings {
-    #[live(0.4)]
-    size: f32a,
-    #[live(0.4)]
-    std: f32a,
-}
-
-
-#[derive(Live, LiveHook, LiveRegister, LiveAtomic, Debug, LiveRead)]
-pub struct ShadowSettings {
-    #[live(0.4)]
-    opacity: f32a,
-    #[live(2.0)]
-    x: f32a,
-    #[live(2.0)]
-    y: f32a
-}
-
 #[derive(Live, LiveHook, LiveRegister, LiveAtomic, Debug, LiveRead)]
 pub struct DelaySettings {
     #[live(0.15)]
@@ -318,11 +273,6 @@ pub struct IronFishSettings {
     noise: f32a,
     #[live(0.0)]
     portamento: f32a,
-
-//    #[live]
-//  blur: BlurSettings,
-//    #[live]
-//  shadow: ShadowSettings,
 }
 
 #[derive(Copy, Clone)]
@@ -1308,34 +1258,6 @@ impl FilterState {
         self.gamma = (2.0 * self.damp).clamp(0.0, 1.0);
     }
 }
-/*
-struct GriesingerReverb {
-    lp_: f32,
-    diffusion_: f32,
-    dphase1: f32,
-    dphase2: f32,
-    writepos: i32,
-    buffer: [f32; 96000]
-}*/
-/*
-impl GriesingerReverb {
-    pub fn init(&mut self, sample_rate: f32) {
-        self.dphase1 = 0.5 / sample_rate;
-        self.dphase2 = 0.3 / sample_rate;
-        self.lp_ = 0.7;
-        self.diffusion_ = 0.625;
-    }
-
-    pub fn fill_buffer(&mut self, buffer: &mut AudioBuffer) {
-
-        for i in 0..buffer.frame_count() {
-            let output = 0.0;
-            buffer.left[i] += output as f32;
-            buffer.right[i] += output as f32;
-        }
-    }
-}
-*/
 
 #[derive(Copy, Clone)]
 pub struct IronFishVoice {
@@ -1758,15 +1680,6 @@ impl IronFishState {
         self.arp.melodylength = current;
     }
 
-    /*
-    pub fn one(&mut self) -> f32 {
-        let mut output: f32 = 0.0;
-        for i in 0..self.voices.len() {
-            output += self.voices[i].one(&self.settings, self.touch, self.lfovalue);
-        }
-        return output; // * 1000.0;
-    }
-    */
     pub fn apply_bitcrush(&mut self, buffer: &mut AudioBuffer) {
         if !self.settings.bitcrush.enable.get() {
             return;
@@ -2351,11 +2264,11 @@ impl AudioComponent for IronFish {
     ) {
     }
     // we dont have inputs
-    fn audio_query(
-        &mut self,
+    fn audio_query<'a>(
+        &'a mut self,
         _query: &AudioQuery,
         _callback: &mut Option<AudioQueryCb>,
-    ) -> AudioResult {
+    ) -> AudioResult<'a> {
         AudioResult::not_found()
     }
 }
