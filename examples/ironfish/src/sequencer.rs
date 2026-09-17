@@ -311,13 +311,15 @@ impl Widget for Sequencer {
 }
 
 impl SequencerRef {
-
-    /*pub fn set_step(&self, step: usize) {
+    /// Writes the grid without emitting a Change action (the caller owns the model).
+    pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
         if let Some(mut inner) = self.borrow_mut() {
-            inner.current_step = step;
+            if steps.len() == inner.grid_x {
+                inner.set_steps(cx, steps);
+            }
         }
-    }*/
-    
+    }
+
     pub fn clear_grid(&self, cx: &mut Cx) {
         if let Some(mut inner) = self.borrow_mut() {
             let mut steps = inner.get_steps(cx);
@@ -350,6 +352,14 @@ impl SequencerRef {
             }
             inner.set_steps(cx, &steps);
             cx.widget_action(inner.widget_uid(), &HeapLiveIdPath::default(), SequencerAction::Change);
+        }
+    }
+}
+
+impl SequencerSet {
+    pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
+        for item in self.iter() {
+            item.set_steps(cx, steps);
         }
     }
 }

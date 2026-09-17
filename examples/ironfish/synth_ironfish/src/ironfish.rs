@@ -206,9 +206,9 @@ pub struct SequencerSettings {
     rootnote: U32A<RootNote>,
 
     #[live(125.0)]
-    bpm: f32a,
+    pub bpm: f32a,
     #[live(false)]
-    playing: boola,
+    pub playing: boola,
 
     #[live(0)]
     oneshot: u32a,

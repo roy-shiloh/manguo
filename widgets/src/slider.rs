@@ -2925,3 +2925,16 @@ impl SliderRef{
         }
     }
 }
+
+impl SliderSet {
+    /// First slide reported by any slider in the set.
+    pub fn slided(&self, actions: &Actions) -> Option<f64> {
+        self.iter().find_map(|v| v.slided(actions))
+    }
+
+    pub fn set_value(&self, cx: &mut Cx, v: f64) {
+        for item in self.iter() {
+            item.set_value(cx, v)
+        }
+    }
+}

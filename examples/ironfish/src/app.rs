@@ -1,5 +1,6 @@
+use crate::makepad_platform::live_atomic::AtomicGetSet;
 use crate::{
-    makepad_audio_graph::*, makepad_audio_widgets::display_audio::*,
+    life::*, life_fractal::*, makepad_audio_graph::*, makepad_audio_widgets::display_audio::*,
     makepad_audio_widgets::piano::*, makepad_synth_ironfish::ironfish::*, makepad_widgets::*,
     sequencer::*,
 };
@@ -8,6 +9,7 @@ live_design! {
     use link::widgets::*
     use link::theme::*
     use makepad_example_ironfish::app_desktop::AppDesktop
+    use makepad_example_ironfish::app_desktop::LifeWindow
 
     use makepad_audio_graph::mixer::Mixer;
     use makepad_audio_graph::instrument::Instrument;
@@ -29,10 +31,27 @@ live_design! {
                 block_signal_event: true;
                 body = <AppDesktop> {}
             }
+            life_window = <Window> {
+                window: {inner_size: vec2(720, 800), title: "IRONFISH LIFE", open_on_start: false},
+                pass: {clear_color: #x1A0A14}
+                block_signal_event: true;
+                body = <LifeWindow> {}
+            }
         }
     }
 }
 app_main!(App);
+
+/// Game of Life running inside the sequencer grid.
+#[derive(Default)]
+pub struct LifeControl {
+    pub enabled: bool,
+    /// Sequencer steps per Life generation (1..=16).
+    pub steps_per_gen: u32,
+    pub timer: Timer,
+    pub seed: u32,
+    pub generation: u64,
+}
 
 #[derive(Live)]
 pub struct App {
@@ -42,6 +61,8 @@ pub struct App {
     audio_graph: AudioGraph,
     #[rust]
     midi_input: MidiInput,
+    #[rust(LifeControl { steps_per_gen: 4, seed: 0xC0FFEE, ..Default::default() })]
+    life: LifeControl,
 }
 
 impl LiveRegister for App {
@@ -50,6 +71,7 @@ impl LiveRegister for App {
         crate::makepad_audio_graph::live_design(cx);
         crate::makepad_synth_ironfish::live_design(cx);
         crate::sequencer::live_design(cx);
+        crate::life_fractal::live_design(cx);
         crate::app_desktop::live_design(cx);
     }
 }
@@ -239,6 +261,13 @@ impl MatchEvent for App {
         self.preset(cx,0,false);
         self.ui.piano(id!(piano)).set_key_focus(cx);
         self.midi_input = cx.midi_input();
+        self.ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
+        // Dev/verification: IRONFISH_OPEN_LIFE=grid|fractal opens the life window running.
+        if let Ok(mode) = std::env::var("IRONFISH_OPEN_LIFE") {
+            self.ui.window(id!(life_window)).open(cx);
+            self.set_life_enabled(cx, true);
+            self.set_life_mode(cx, mode == "fractal");
+        }
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
@@ -287,18 +316,52 @@ impl MatchEvent for App {
         if ui.button_set(ids!(grid_up)).clicked(&actions) {
             sequencer.grid_up(cx);
         }
-        
-      
+
         if let Some((index,km)) = ui.button_set(ids!(preset_1, preset_2, preset_3, preset_4, preset_5, preset_6, preset_7,preset_8)).which_clicked_modifiers(&actions){
             self.preset(cx, index, km.shift);
         }
-        
+
+        // Game of Life controls (present in both windows; ids are shared)
+        let life_toggled = ui.check_box_set(ids!(life.checkbox)).changed(&actions);
+        if let Some(on) = life_toggled {
+            self.set_life_enabled(cx, on);
+        }
+        if let Some(v) = ui.slider_set(ids!(liferate.slider)).slided(&actions) {
+            self.life.steps_per_gen = (v.round() as u32).clamp(1, 16);
+            ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
+            if self.life.enabled {
+                self.restart_life_timer(cx);
+            }
+        }
+        if ui.button_set(ids!(lifeseed.button)).clicked(&actions) {
+            self.life_seed(cx);
+        }
+        if ui.button_set(ids!(lifewindow.button)).clicked(&actions) {
+            ui.window(id!(life_window)).open(cx);
+            // make sure the fractal has the current grid
+            let grid = self.life_grid();
+            ui.life_fractal(id!(fractal)).set_grid(cx, &grid);
+        }
+        if ui.button(id!(tab_grid)).clicked(&actions) {
+            self.set_life_mode(cx, false);
+        }
+        if ui.button(id!(tab_fractal)).clicked(&actions) {
+            self.set_life_mode(cx, true);
+        }
+        if let Some(v) = ui.slider(id!(zoomspeed.slider)).slided(&actions) {
+            ui.life_fractal(id!(fractal)).set_speed(v as f32);
+        }
+
         let mut db = DataBindingStore::new();
         db.data_bind(cx, actions, &ui, Self::data_bind);
 
-
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
         ironfish.settings.apply_over(cx, &db.nodes);
+
+        // bpm changed while Life runs: retime the generation clock
+        if self.life.enabled && ui.slider_set(ids!(speed.slider)).slided(&actions).is_some() {
+            self.restart_life_timer(cx);
+        }
     }
 
     fn handle_midi_ports(&mut self, cx: &mut Cx, ports: &MidiPortsEvent) {
@@ -364,9 +427,113 @@ impl App{
     }
 }
 
+// Game of Life
+impl App {
+    fn life_grid(&mut self) -> Life {
+        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+        let steps: Vec<u32> = (0..16).map(|i| ironfish.settings.sequencer.get_step(i)).collect();
+        Life::from_steps(&steps)
+    }
+
+    /// Writes a grid to the synth model and every on-screen sequencer.
+    fn write_life_grid(&mut self, cx: &mut Cx, life: &Life) {
+        let steps = life.to_steps();
+        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+        for (i, s) in steps.iter().enumerate() {
+            ironfish.settings.sequencer.set_step(i, *s);
+        }
+        self.ui.sequencer_set(ids!(sequencer)).set_steps(cx, &steps);
+        self.ui.life_fractal(id!(fractal)).set_grid(cx, life);
+        self.ui.redraw(cx);
+    }
+
+    fn life_interval(&mut self) -> f64 {
+        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+        let bpm = ironfish.settings.sequencer.bpm.get().max(20.0) as f64;
+        // one sequencer step is a 16th note
+        60.0 / bpm / 4.0 * self.life.steps_per_gen.max(1) as f64
+    }
+
+    fn restart_life_timer(&mut self, cx: &mut Cx) {
+        cx.stop_timer(self.life.timer);
+        self.life.timer = cx.start_interval(self.life_interval());
+    }
+
+    fn set_life_enabled(&mut self, cx: &mut Cx, on: bool) {
+        self.life.enabled = on;
+        self.ui.check_box_set(ids!(life.checkbox)).set_active(cx, on);
+        if on {
+            if self.life_grid().is_empty() {
+                self.life_seed(cx);
+            }
+            // make the cells audible
+            let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+            ironfish.settings.sequencer.playing.set(true);
+            self.ui.check_box_set(ids!(playpause)).set_active(cx, true);
+            self.restart_life_timer(cx);
+        } else {
+            cx.stop_timer(self.life.timer);
+        }
+    }
+
+    /// Stamp a random pattern at a random position.
+    fn life_seed(&mut self, cx: &mut Cx) {
+        let mut grid = self.life_grid();
+        let seed = &mut self.life.seed;
+        let n = 1 + next_u32(seed) % 3;
+        for _ in 0..n {
+            let p = Pattern::pick(seed);
+            let x = (next_u32(seed) % W as u32) as usize;
+            let y = (next_u32(seed) % H as u32) as usize;
+            grid.stamp(p, x, y, seed);
+        }
+        self.write_life_grid(cx, &grid);
+    }
+
+    /// Stamp a pattern at a chosen row (used by voice control).
+    pub fn life_stamp_at_row(&mut self, cx: &mut Cx, row: usize, count: usize) {
+        let mut grid = self.life_grid();
+        let seed = &mut self.life.seed;
+        for _ in 0..count {
+            let p = Pattern::pick(seed);
+            let x = (next_u32(seed) % W as u32) as usize;
+            grid.stamp(p, x, row.min(H - 1), seed);
+        }
+        self.write_life_grid(cx, &grid);
+    }
+
+    fn set_life_mode(&mut self, cx: &mut Cx, fractal: bool) {
+        self.ui.view(id!(grid_page)).set_visible(cx, !fractal);
+        self.ui.view(id!(fractal_page)).set_visible(cx, fractal);
+        let grid = self.life_grid();
+        let f = self.ui.life_fractal(id!(fractal));
+        f.set_grid(cx, &grid);
+        f.set_running(cx, fractal);
+        self.ui.redraw(cx);
+    }
+
+    fn life_tick(&mut self, cx: &mut Cx) {
+        let mut next = self.life_grid().step();
+        if next.is_empty() {
+            let seed = &mut self.life.seed;
+            let p = Pattern::pick(seed);
+            let x = (next_u32(seed) % W as u32) as usize;
+            let y = (next_u32(seed) % H as u32) as usize;
+            next.stamp(p, x, y, seed);
+        }
+        self.life.generation += 1;
+        self.write_life_grid(cx, &next);
+    }
+}
+
 impl AppMain for App {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         self.match_event(cx, event);
+        if let Event::Timer(te) = event {
+            if self.life.timer.is_timer(te).is_some() && self.life.enabled {
+                self.life_tick(cx);
+            }
+        }
         self.ui.handle_event(cx, event, &mut Scope::empty());
 
         self.audio_graph

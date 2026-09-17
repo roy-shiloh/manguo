@@ -1692,3 +1692,16 @@ impl CheckBoxRef {
         }
     }
 }
+
+impl CheckBoxSet {
+    /// First change reported by any checkbox in the set.
+    pub fn changed(&self, actions: &Actions) -> Option<bool> {
+        self.iter().find_map(|v| v.changed(actions))
+    }
+
+    pub fn set_active(&self, cx: &mut Cx, value: bool) {
+        for item in self.iter() {
+            item.set_active(cx, value)
+        }
+    }
+}

@@ -6,6 +6,7 @@ live_design! {
     use link::shaders::*
 
     use makepad_example_ironfish::sequencer::Sequencer;
+    use makepad_example_ironfish::life_fractal::LifeFractal;
     use makepad_audio_widgets::display_audio::DisplayAudio;
     use makepad_audio_widgets::piano::Piano;
 
@@ -187,7 +188,7 @@ live_design! {
                 return Pal::premul(vec4(col.xyz, 1.0));
             }
         }
-        <Label> {
+        glyphs = <Label> {
             draw_text: {
                 text_style: <THEME_FONT_BOLD> {font_size: 150},
                 color: #fff
@@ -201,6 +202,19 @@ live_design! {
         height: 96,
         clip_x: true, clip_y: true,
         logo_inner = <PixelLogoInner> {}
+    }
+
+    // Half-size variant for the life window title
+    PixelLogoSmall = <View> {
+        width: 220,
+        height: 48,
+        clip_x: true, clip_y: true,
+        logo_inner = <PixelLogoInner> {
+            width: 220, height: 200
+            margin: {top: -47}
+            draw_bg: { cellsize: 3.0 }
+            glyphs = { draw_text: { text_style: <THEME_FONT_BOLD> {font_size: 75} } }
+        }
     }
 
 
@@ -989,6 +1003,46 @@ live_design! {
 
     }
 
+    // Pixel-art icon button (generated 8-bit assets): a bevelled FishButton
+    // with a PixelIcon overlaid.
+    PxButton = <View> {
+        width: 28, height: 28
+        flow: Overlay
+        align: {x: 0.5, y: 0.5}
+        button = <FishButton> { width: Fill, height: Fill, padding: 0, margin: 0, text: "" }
+        icon = <PixelIcon> { width: 20, height: 20 }
+    }
+
+    // Game of Life controls: shared ids between the main and the life window
+    LifeControls = <View> {
+        height: Fit,
+        width: Fill
+        flow: Right,
+        spacing: (SSPACING_1),
+        padding: {top: (SSPACING_2), bottom: (SSPACING_0)}
+        align: {x: 0.0, y: 0.5}
+
+        <PixelIcon> { source: (PX_CELL), width: 18, height: 18, margin: {right: 2} }
+        life = <FishToggle> {
+            width: Fit
+            checkbox = { text: "Life", width: Fit, padding: {right: (SSPACING_2)} }
+        }
+        liferate = <InstrumentSlider> {
+            width: Fill
+            slider = {
+                draw_bg: {line_color: (COLOR_HOT)}
+                min: 1.0
+                max: 16.0
+                step: 1.0
+                precision: 0
+                default: 4.0
+                text: "Steps/Gen"
+            }
+        }
+        lifeseed = <PxButton> { icon = { source: (PX_SEED) } }
+        lifewindow = <PxButton> { icon = { source: (PX_SPIRAL) } }
+    }
+
     SequencerControls = <View> {
         height: Fit,
         width: Fill,
@@ -1030,6 +1084,8 @@ live_design! {
             grid_up = <IconButton> {draw_icon: {svg_file: (ICO_UP)} icon_walk: {width: 10.0, height: Fit}}
             grid_down = <IconButton> {draw_icon: {svg_file: (ICO_DOWN)} icon_walk: {width: 10.0, height: Fit}}
         }
+
+        <LifeControls> {}
     }
 
     Arp = <GradientYView> {
@@ -2111,6 +2167,91 @@ live_design! {
             }
 
             <Play> {}
+        }
+    }
+
+    // Secondary window: the Life grid, big, with a fractal mode.
+    pub LifeWindow = <View> {
+        flow: Overlay
+        width: Fill,
+        height: Fill
+
+        // dimmed pixel-hearts backdrop
+        <Image> {
+            width: Fill, height: Fill
+            source: (PX_BG)
+            fit: Stretch
+            draw_bg: {
+                fn get_color(self) -> vec4 {
+                    let uv = fract(self.pos * vec2(2.0, 2.2));
+                    let c = sample2d(self.image, uv);
+                    return vec4(mix((COLOR_BG).xyz, c.xyz, 0.16), 1.0);
+                }
+            }
+        }
+
+        <View> {
+        flow: Down
+        width: Fill,
+        height: Fill
+        padding: <SPACING_3> {}
+        spacing: (SSPACING_2)
+
+        <View> {
+            width: Fill, height: Fit
+            flow: Right
+            align: {x: 0.0, y: 0.5}
+            spacing: (SSPACING_2)
+            <PixelLogoSmall> {}
+            <FillerH> {}
+            life_mode = <View> {
+                width: Fit, height: Fit
+                flow: Right
+                spacing: 2
+                tab_grid = <FishButton> { text: "GRID", width: 72, height: 26, padding: 0 }
+                tab_fractal = <FishButton> { text: "FRACTAL", width: 96, height: 26, padding: 0 }
+            }
+        }
+
+        life_pages = <View> {
+            width: Fill, height: Fill
+            flow: Overlay
+            grid_page = <FishPanel> {
+                width: Fill, height: Fill
+                align: {x: 0.5, y: 0.5}
+                sequencer = <Sequencer> {
+                    width: 608, height: 608,
+                    margin: 0
+                    button_size: vec2(38.0, 38.0)
+                }
+            }
+            fractal_page = <View> {
+                visible: false
+                width: Fill, height: Fill
+                fractal = <LifeFractal> { width: Fill, height: Fill }
+            }
+        }
+
+        <FishPanel> {
+            width: Fill, height: Fit
+            <LifeControls> {}
+            <View> {
+                width: Fill, height: Fit
+                flow: Right
+                align: {x: 0.0, y: 0.5}
+                spacing: (SSPACING_1)
+                zoomspeed = <InstrumentSlider> {
+                    width: Fill
+                    slider = {
+                        draw_bg: {line_color: (COLOR_FX)}
+                        min: 0.0
+                        max: 1.0
+                        default: 0.3
+                        text: "Zoom speed"
+                    }
+                }
+            }
+        }
         }
     }
 }
