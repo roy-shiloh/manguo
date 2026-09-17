@@ -321,6 +321,28 @@ impl WindowRef{
         }
     }
 
+    pub fn is_open(&self, cx: &Cx) -> bool {
+        if let Some(inner) = self.borrow() {
+            inner.window.is_created(cx)
+        }
+        else {
+            false
+        }
+    }
+
+    /// Opens the OS window if closed (or declared with `open_on_start: false`).
+    pub fn open(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.window.open(cx);
+            inner.redraw(cx);
+        }
+    }
+
+    pub fn close(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            inner.window.close(cx);
+        }
+    }
 }
 
 impl Widget for Window {

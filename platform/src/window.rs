@@ -166,6 +166,15 @@ impl LiveApply for WindowHandle {
                     let v:bool = LiveNew::new_apply_mut_index(cx, apply, &mut index, nodes);
                     self.set_topmost(cx, v);
                 }
+                live_id!(open_on_start) => {
+                    let v:bool = LiveNew::new_apply_mut_index(cx, apply, &mut index, nodes);
+                    if !v {
+                        // drop the CreateWindow op queued by `new`; the window
+                        // is opened later through `WindowHandle::open`.
+                        let window_id = self.window_id();
+                        cx.platform_ops.retain(|op| !matches!(op, CxOsOp::CreateWindow(id) if *id == window_id));
+                    }
+                }
                 _ => {
                     cx.apply_error_no_matching_field(live_error_origin!(), index, nodes);
                     index = nodes.skip_node(index);
@@ -244,6 +253,17 @@ impl WindowHandle {
     
     pub fn close(&mut self, cx: &mut Cx) {
         cx.push_unique_platform_op(CxOsOp::CloseWindow(self.window_id()));
+    }
+
+    pub fn is_created(&self, cx: &Cx) -> bool {
+        cx.windows[self.window_id()].is_created
+    }
+
+    /// (Re)creates the OS window if it is not currently open.
+    pub fn open(&self, cx: &mut Cx) {
+        if !self.is_created(cx) {
+            cx.push_unique_platform_op(CxOsOp::CreateWindow(self.window_id()));
+        }
     }
 }
 
