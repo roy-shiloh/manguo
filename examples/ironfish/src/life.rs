@@ -45,10 +45,6 @@ pub fn next_u32(seed: &mut u32) -> u32 {
     x
 }
 
-pub fn next_f32(seed: &mut u32) -> f32 {
-    (next_u32(seed) >> 8) as f32 / (1u32 << 24) as f32
-}
-
 impl Life {
     pub fn from_steps(steps: &[u32]) -> Life {
         let mut cells = [0u16; W];

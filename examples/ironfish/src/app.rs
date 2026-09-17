@@ -321,6 +321,9 @@ impl MatchEvent for App {
         self.ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
         self.start_voice_input(cx);
         // Dev/verification: IRONFISH_OPEN_LIFE=grid|fractal opens the life window running.
+        if std::env::var("IRONFISH_VOICE_TEST").is_ok() {
+            self.set_voice_enabled(cx, true);
+        }
         if let Ok(mode) = std::env::var("IRONFISH_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
             self.set_life_enabled(cx, true);
@@ -465,6 +468,18 @@ impl App {
         let mut ring = [0.0f32; N];
         let mut write = 0usize;
         let mut scratch = [0.0f32; N];
+        // Dev/verification: IRONFISH_VOICE_TEST=<hz>[:<seconds>] replaces the
+        // mic with a synthetic "sung" tone (optionally stopping after N seconds)
+        // so the whole chain can be exercised headless.
+        let (test_hz, test_secs): (Option<f32>, f32) = match std::env::var("IRONFISH_VOICE_TEST") {
+            Ok(v) => {
+                let mut it = v.split(':');
+                (it.next().and_then(|h| h.parse().ok()), it.next().and_then(|s| s.parse().ok()).unwrap_or(f32::INFINITY))
+            }
+            Err(_) => (None, 0.0),
+        };
+        let mut phase = 0.0f32;
+        let mut test_frames = 0u64;
         cx.audio_input(0, move |_info, input| {
             let frames = input.frame_count();
             if frames == 0 || input.channel_count() == 0 {
@@ -473,7 +488,14 @@ impl App {
             let ch = input.channel(0);
             let mut sum = 0.0f32;
             for i in 0..frames {
-                let s = ch[i];
+                let mut s = ch[i];
+                if let Some(hz) = test_hz {
+                    test_frames += 1;
+                    phase = (phase + hz / 48000.0).fract();
+                    s = if (test_frames as f32) < test_secs * 48000.0 {
+                        0.2 * (phase * std::f32::consts::TAU).sin() + 0.08 * (phase * 2.0 * std::f32::consts::TAU).sin()
+                    } else { 0.0 };
+                }
                 sum += s * s;
                 ring[write] = s;
                 write = (write + 1) % N;

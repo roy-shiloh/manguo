@@ -2221,12 +2221,13 @@ live_design! {
                                 let wave = sample2d(self.wave_texture, vec2(qpos.x / self.rect_size.x, step));
                                 let right = (wave.y + wave.z / 256.0 - 0.5) * 3.0;
                                 let left = (wave.w + wave.x / 256.0 - 0.5) * 3.0;
-                                let audio = floor(((left + right) - 0.01) * half / px) * px / half;
+                                let audio = clamp((left + right) * 0.5 - 0.01, -0.45, 0.45);
+                                let audio = floor(audio * half / px) * px / half;
                                 let thick = abs(audio) * half * 2.0;
                                 sdf.hline(half + audio * half * 2.0, max(thick, px) * step(0.001, thick));
                                 let t = step * 4.0;
-                                let color = mix((COLOR_HOT), (COLOR_FX), t) * (1.0 - t * 0.5);
-                                sdf.fill_premul(vec4(color.xyz, 0.0))
+                                let color = mix((COLOR_HOT), (COLOR_FX), t);
+                                sdf.fill(vec4(color.xyz, 0.35 - t * 0.2))
                                 step += 1.0 / 16.0;
                             }
                             return sdf.result
