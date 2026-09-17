@@ -500,8 +500,20 @@ impl Cx {
                 }
             }
             DrawPassMode::Drawable(drawable) => {
+                // Agent verification hook: MAKEPAD_GRAB_PPM=<path> dumps one
+                // presented frame (of the pass whose window matches
+                // MAKEPAD_GRAB_WINDOW, default 0) as a binary PPM, then exits.
+                let grab = Self::grab_ppm_target(pass_id, &self.passes);
+                let grab_dst = if grab.is_some() {
+                    Some(unsafe { Self::blit_drawable_to_shared(metal_cx, command_buffer, drawable) })
+                } else { None };
                 let () = unsafe {msg_send![command_buffer, presentDrawable: drawable]};
                 self.commit_command_buffer(None, command_buffer, gpu_read_guards);
+                if let (Some(path), Some((dst, w, h))) = (grab, grab_dst) {
+                    let () = unsafe {msg_send![command_buffer, waitUntilCompleted]};
+                    Self::write_ppm(&path, dst, w, h);
+                    std::process::exit(0);
+                }
             }
             DrawPassMode::Resizing(drawable) => {
                 self.commit_command_buffer(None, command_buffer, gpu_read_guards);
@@ -510,6 +522,79 @@ impl Cx {
             }
         }
         let () = unsafe {msg_send![pool, release]};
+    }
+
+    fn grab_ppm_target(pass_id: PassId, passes: &crate::pass::CxPassPool) -> Option<String> {
+        let path = std::env::var("MAKEPAD_GRAB_PPM").ok()?;
+        let want: usize = std::env::var("MAKEPAD_GRAB_WINDOW").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        if let crate::pass::CxPassParent::Window(window_id) = passes[pass_id].parent {
+            if window_id.id() == want {
+                // let the app settle for a few presented frames first
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                static FRAMES: AtomicUsize = AtomicUsize::new(0);
+                let delay: usize = std::env::var("MAKEPAD_GRAB_DELAY_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+                if FRAMES.fetch_add(1, Ordering::Relaxed) + 1 >= delay {
+                    return Some(path);
+                }
+            }
+        }
+        None
+    }
+
+    unsafe fn blit_drawable_to_shared(metal_cx: &MetalCx, command_buffer: ObjcId, drawable: ObjcId) -> (ObjcId, u64, u64) {
+        let src: ObjcId = msg_send![drawable, texture];
+        let w: u64 = msg_send![src, width];
+        let h: u64 = msg_send![src, height];
+        let descriptor: ObjcId = msg_send![
+            class!(MTLTextureDescriptor),
+            texture2DDescriptorWithPixelFormat: MTLPixelFormat::BGRA8Unorm
+            width: w
+            height: h
+            mipmapped: NO
+        ];
+        let () = msg_send![descriptor, setStorageMode: MTLStorageMode::Shared];
+        let () = msg_send![descriptor, setUsage: MTLTextureUsage::ShaderRead];
+        let dst: ObjcId = msg_send![metal_cx.device, newTextureWithDescriptor: descriptor];
+        let blit: ObjcId = msg_send![command_buffer, blitCommandEncoder];
+        let () = msg_send![
+            blit,
+            copyFromTexture: src
+            sourceSlice: 0u64
+            sourceLevel: 0u64
+            sourceOrigin: MTLOrigin {x: 0, y: 0, z: 0}
+            sourceSize: MTLSize {width: w, height: h, depth: 1}
+            toTexture: dst
+            destinationSlice: 0u64
+            destinationLevel: 0u64
+            destinationOrigin: MTLOrigin {x: 0, y: 0, z: 0}
+        ];
+        let () = msg_send![blit, endEncoding];
+        (dst, w, h)
+    }
+
+    fn write_ppm(path: &str, tex: ObjcId, w: u64, h: u64) {
+        let mut buf = vec![0u32; (w * h) as usize];
+        let region = MTLRegion {
+            origin: MTLOrigin {x: 0, y: 0, z: 0},
+            size: MTLSize {width: w, height: h, depth: 1}
+        };
+        let _: () = unsafe {msg_send![
+            tex,
+            getBytes: buf.as_mut_ptr()
+            bytesPerRow: (w * 4) as usize
+            bytesPerImage: (w * h * 4) as usize
+            fromRegion: region
+            mipmapLevel: 0u64
+            slice: 0u64
+        ]};
+        let mut out = format!("P6\n{} {}\n255\n", w, h).into_bytes();
+        for px in buf {
+            let b = px.to_le_bytes();
+            out.extend_from_slice(&[b[2], b[1], b[0]]);
+        }
+        if let Err(e) = std::fs::write(path, out) {
+            crate::error!("MAKEPAD_GRAB_PPM write failed: {}", e);
+        }
     }
     
     fn commit_command_buffer(&mut self, stdin_frame: Option<PresentableDraw>, command_buffer: ObjcId, gpu_read_guards: Vec<MetalRwLockGpuReadGuard>) {
