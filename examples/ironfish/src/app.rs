@@ -1,4 +1,6 @@
 use crate::makepad_platform::live_atomic::AtomicGetSet;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use crate::{
     life::*, life_fractal::*, makepad_audio_graph::*, makepad_audio_widgets::display_audio::*,
     makepad_audio_widgets::piano::*, makepad_synth_ironfish::ironfish::*, makepad_widgets::*,
@@ -26,7 +28,7 @@ live_design! {
         }
         ui: <Root>{
             main_window = <Window> {
-                window: {inner_size: vec2(1280, 1000), title: "IRONFISH 芒果"},
+                window: {inner_size: vec2(1280, 1060), title: "IRONFISH 芒果"},
                 pass: {clear_color: #x1A0A14}
                 block_signal_event: true;
                 body = <AppDesktop> {}
@@ -41,6 +43,59 @@ live_design! {
     }
 }
 app_main!(App);
+
+/// Published by the audio-input callback, read on the UI thread. Lock-free.
+#[derive(Default)]
+pub struct VoiceShared {
+    /// RMS level of the last input buffer, as f32 bits
+    level: AtomicU32,
+    /// Estimated fundamental in Hz (0 when unsure), as f32 bits
+    pitch_hz: AtomicU32,
+}
+
+impl VoiceShared {
+    fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+    fn pitch(&self) -> f32 {
+        f32::from_bits(self.pitch_hz.load(Ordering::Relaxed))
+    }
+}
+
+/// Voice-to-synth control state (UI thread).
+pub struct VoiceControl {
+    pub enabled: bool,
+    /// RMS threshold for a note-on
+    pub threshold: f32,
+    /// Randomization amount 0..1
+    pub chaos: f32,
+    pub active_note: Option<u8>,
+    pub base_note: u8,
+    pub interval: i8,
+    pub last_rand_time: f64,
+    pub silence_since: Option<f64>,
+    pub seed: u32,
+    pub shared: Arc<VoiceShared>,
+    pub smoothed_level: f32,
+}
+
+impl Default for VoiceControl {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold: 0.03,
+            chaos: 0.35,
+            active_note: None,
+            base_note: 0,
+            interval: 0,
+            last_rand_time: 0.0,
+            silence_since: None,
+            seed: 0x5EED_1234,
+            shared: Arc::new(VoiceShared::default()),
+            smoothed_level: 0.0,
+        }
+    }
+}
 
 /// Game of Life running inside the sequencer grid.
 #[derive(Default)]
@@ -63,6 +118,8 @@ pub struct App {
     midi_input: MidiInput,
     #[rust(LifeControl { steps_per_gen: 4, seed: 0xC0FFEE, ..Default::default() })]
     life: LifeControl,
+    #[rust]
+    voice: VoiceControl,
 }
 
 impl LiveRegister for App {
@@ -262,6 +319,7 @@ impl MatchEvent for App {
         self.ui.piano(id!(piano)).set_key_focus(cx);
         self.midi_input = cx.midi_input();
         self.ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
+        self.start_voice_input(cx);
         // Dev/verification: IRONFISH_OPEN_LIFE=grid|fractal opens the life window running.
         if let Ok(mode) = std::env::var("IRONFISH_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
@@ -321,6 +379,18 @@ impl MatchEvent for App {
             self.preset(cx, index, km.shift);
         }
 
+        // Voice controls
+        if let Some(on) = ui.check_box(id!(voice.checkbox)).changed(&actions) {
+            self.set_voice_enabled(cx, on);
+        }
+        if let Some(v) = ui.slider(id!(voicesens.slider)).slided(&actions) {
+            // 0..1 -> RMS threshold 0.15 .. 0.005 (log-ish); higher = more sensitive
+            self.voice.threshold = 0.15 * (0.005f32 / 0.15).powf(v as f32);
+        }
+        if let Some(v) = ui.slider(id!(voicechaos.slider)).slided(&actions) {
+            self.voice.chaos = v as f32;
+        }
+
         // Game of Life controls (present in both windows; ids are shared)
         let life_toggled = ui.check_box_set(ids!(life.checkbox)).changed(&actions);
         if let Some(on) = life_toggled {
@@ -370,6 +440,7 @@ impl MatchEvent for App {
 
     fn handle_audio_devices(&mut self, cx: &mut Cx, devices: &AudioDevicesEvent) {
         cx.use_audio_outputs(&devices.default_output());
+        cx.use_audio_inputs(&devices.default_input());
     }
 
     fn handle_signal(&mut self, cx: &mut Cx) {
@@ -379,6 +450,166 @@ impl MatchEvent for App {
             if let Some(note) = data.decode().on_note() {
                 piano.set_note(cx, note.is_on, note.note_number)
             }
+        }
+        self.voice_update(cx);
+    }
+}
+
+// Voice control
+impl App {
+    /// Registers the microphone callback. It owns its analysis state, never
+    /// allocates on the hot path and publishes through atomics only.
+    fn start_voice_input(&mut self, cx: &mut Cx) {
+        let shared = self.voice.shared.clone();
+        const N: usize = 1024;
+        let mut ring = [0.0f32; N];
+        let mut write = 0usize;
+        let mut scratch = [0.0f32; N];
+        cx.audio_input(0, move |_info, input| {
+            let frames = input.frame_count();
+            if frames == 0 || input.channel_count() == 0 {
+                return;
+            }
+            let ch = input.channel(0);
+            let mut sum = 0.0f32;
+            for i in 0..frames {
+                let s = ch[i];
+                sum += s * s;
+                ring[write] = s;
+                write = (write + 1) % N;
+            }
+            let rms = (sum / frames as f32).sqrt();
+            shared.level.store(rms.to_bits(), Ordering::Relaxed);
+
+            // pitch via normalized autocorrelation over the ring, lags 80..1000 Hz
+            let mut pitch = 0.0f32;
+            if rms > 0.005 {
+                for i in 0..N {
+                    scratch[i] = ring[(write + i) % N];
+                }
+                let sr = 48000.0f32; // makepad opens inputs at 48 kHz
+                let min_lag = (sr / 1000.0) as usize;
+                let max_lag = ((sr / 80.0) as usize).min(N / 2);
+                let mut best_lag = 0usize;
+                let mut best = 0.0f32;
+                let mut e0 = 0.0f32;
+                for i in 0..(N - max_lag) {
+                    e0 += scratch[i] * scratch[i];
+                }
+                let mut lag = min_lag;
+                while lag < max_lag {
+                    let mut acc = 0.0f32;
+                    let mut e1 = 0.0f32;
+                    for i in 0..(N - max_lag) {
+                        acc += scratch[i] * scratch[i + lag];
+                        e1 += scratch[i + lag] * scratch[i + lag];
+                    }
+                    let norm = (e0 * e1).sqrt().max(1e-9);
+                    let r = acc / norm;
+                    if r > best {
+                        best = r;
+                        best_lag = lag;
+                    }
+                    lag += 1;
+                }
+                if best > 0.6 && best_lag > 0 {
+                    pitch = sr / best_lag as f32;
+                }
+            }
+            shared.pitch_hz.store(pitch.to_bits(), Ordering::Relaxed);
+            SignalToUI::set_ui_signal();
+        });
+    }
+
+    fn set_voice_enabled(&mut self, cx: &mut Cx, on: bool) {
+        self.voice.enabled = on;
+        self.ui.check_box_set(ids!(voice.checkbox)).set_active(cx, on);
+        if !on {
+            self.voice_note_off(cx);
+        }
+        self.update_voice_portraits(cx);
+    }
+
+    fn voice_note_on(&mut self, cx: &mut Cx, note: u8) {
+        self.voice_note_off(cx);
+        self.audio_graph.send_midi_data(
+            MidiNote { channel: 0, is_on: true, note_number: note, velocity: 100 }.into(),
+        );
+        self.ui.piano_set(ids!(piano)).set_note(cx, true, note);
+        self.voice.active_note = Some(note);
+        self.update_voice_portraits(cx);
+    }
+
+    fn voice_note_off(&mut self, cx: &mut Cx) {
+        if let Some(note) = self.voice.active_note.take() {
+            self.audio_graph.send_midi_data(
+                MidiNote { channel: 0, is_on: false, note_number: note, velocity: 0 }.into(),
+            );
+            self.ui.piano_set(ids!(piano)).set_note(cx, false, note);
+            self.update_voice_portraits(cx);
+        }
+    }
+
+    fn update_voice_portraits(&mut self, cx: &mut Cx) {
+        let singing = self.voice.active_note.is_some();
+        self.ui.view(id!(portrait_cat)).set_visible(cx, !singing);
+        self.ui.view(id!(portrait_roy)).set_visible(cx, singing);
+    }
+
+    fn voice_update(&mut self, cx: &mut Cx) {
+        let level = self.voice.shared.level();
+        let pitch = self.voice.shared.pitch();
+        self.voice.smoothed_level += (level - self.voice.smoothed_level) * 0.3;
+        let now = cx.seconds_since_app_start();
+        self.ui.life_fractal(id!(fractal)).set_voice_level((self.voice.smoothed_level / self.voice.threshold.max(1e-3)).min(3.0) / 3.0);
+        if !self.voice.enabled {
+            return;
+        }
+
+        let th = self.voice.threshold;
+        if level > th && pitch > 0.0 {
+            self.voice.silence_since = None;
+            let midi = (69.0 + 12.0 * (pitch / 440.0).log2()).round().clamp(36.0, 84.0) as u8;
+            let retrigger = match self.voice.active_note {
+                None => true,
+                Some(_) => (midi as i32 - self.voice.base_note as i32).abs() > 1,
+            };
+            if retrigger {
+                let seed = &mut self.voice.seed;
+                // random interval jump, weighted toward none
+                let r = next_u32(seed) % 10;
+                self.voice.interval = match r {
+                    0 => 12,
+                    1 => -12,
+                    2 => 7,
+                    3 => -5,
+                    4 => 5,
+                    _ => 0,
+                };
+                self.voice.base_note = midi;
+                let note = (midi as i32 + self.voice.interval as i32).clamp(24, 96) as u8;
+                self.voice_note_on(cx, note);
+                // seed the Life grid at a pitch-dependent row
+                let row = ((midi.saturating_sub(36)) as usize * 16 / 49).min(15);
+                let count = if level > th * 2.0 { 2 } else { 1 };
+                self.life_stamp_at_row(cx, row, count);
+            }
+        } else if level < th * 0.5 {
+            match self.voice.silence_since {
+                None => self.voice.silence_since = Some(now),
+                Some(t) if now - t > 0.15 => {
+                    self.voice_note_off(cx);
+                }
+                _ => {}
+            }
+        }
+
+        // while a note is held: rapidly randomize the synth
+        if self.voice.active_note.is_some() && now - self.voice.last_rand_time > 0.06 {
+            self.voice.last_rand_time = now;
+            let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+            ironfish.settings.randomize(&mut self.voice.seed, self.voice.chaos);
+            self.init_ui_state(cx);
         }
     }
 }

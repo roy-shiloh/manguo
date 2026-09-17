@@ -275,6 +275,75 @@ pub struct IronFishSettings {
     portamento: f32a,
 }
 
+impl IronFishSettings {
+    /// Nudges the sound design toward a fresh random point.
+    ///
+    /// `amount` in 0..1 is how far each parameter moves from its current
+    /// value toward a new random value (0 = jitter, 1 = wild jumps). Envelope
+    /// times, feedback paths and the sequencer/arp are left alone so a held
+    /// voice note keeps sounding and nothing runs away.
+    pub fn randomize(&self, seed: &mut u32, amount: f32) {
+        fn rnd(seed: &mut u32) -> f32 {
+            let mut x = *seed;
+            if x == 0 {
+                x = 0x9E37_79B9;
+            }
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *seed = x;
+            (x >> 8) as f32 / (1u32 << 24) as f32
+        }
+        let amount = amount.clamp(0.0, 1.0);
+        let lerp = |v: &f32a, lo: f32, hi: f32, seed: &mut u32| {
+            let cur = v.get();
+            let target = lo + rnd(seed) * (hi - lo);
+            v.set(cur + (target - cur) * amount);
+        };
+
+        lerp(&self.filter1.cutoff, 0.05, 1.0, seed);
+        lerp(&self.filter1.resonance, 0.0, 0.9, seed);
+        lerp(&self.filter1.lfo_amount, -1.0, 1.0, seed);
+        lerp(&self.filter1.envelope_amount, -1.0, 1.0, seed);
+        lerp(&self.lfo.rate, 0.0, 1.0, seed);
+
+        lerp(&self.osc1.detune, -1.0, 1.0, seed);
+        lerp(&self.osc2.detune, -1.0, 1.0, seed);
+        lerp(&self.osc1.harmonic, 0.0, 1.0, seed);
+        lerp(&self.osc2.harmonic, 0.0, 1.0, seed);
+        lerp(&self.osc1.harmonicenv, -1.0, 1.0, seed);
+        lerp(&self.osc2.harmonicenv, -1.0, 1.0, seed);
+        lerp(&self.osc1.harmoniclfo, -1.0, 1.0, seed);
+        lerp(&self.osc2.harmoniclfo, -1.0, 1.0, seed);
+        lerp(&self.supersaw1.spread, 0.0, 1.0, seed);
+        lerp(&self.supersaw1.diffuse, 0.0, 1.0, seed);
+        lerp(&self.supersaw2.spread, 0.0, 1.0, seed);
+        lerp(&self.supersaw2.diffuse, 0.0, 1.0, seed);
+
+        lerp(&self.osc_balance, 0.0, 1.0, seed);
+        lerp(&self.noise, 0.0, 0.6, seed);
+        lerp(&self.sub_osc, 0.0, 1.0, seed);
+
+        lerp(&self.bitcrush.amount, 0.0, 1.0, seed);
+        lerp(&self.delay.delaysend, 0.0, 0.8, seed);
+        lerp(&self.chorus.mix, 0.0, 1.0, seed);
+        lerp(&self.chorus.moddepth, 0.0, 1.0, seed);
+        lerp(&self.chorus.rate, 0.0, 1.0, seed);
+        lerp(&self.reverb.mix, 0.0, 0.7, seed);
+
+        // oscillator types jump with probability `amount`
+        if rnd(seed) < amount {
+            self.osc1.osc_type.set(OscType::from_u32(((rnd(seed) * 6.0) as u32).min(5)));
+        }
+        if rnd(seed) < amount {
+            self.osc2.osc_type.set(OscType::from_u32(((rnd(seed) * 6.0) as u32).min(5)));
+        }
+        if rnd(seed) < amount * 0.5 {
+            self.bitcrush.enable.set(rnd(seed) < 0.5);
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct SequencerState {
     currentstep: usize,

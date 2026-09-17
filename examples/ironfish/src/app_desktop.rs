@@ -1259,7 +1259,7 @@ live_design! {
 
                 <Divider> {margin: {top: (SSPACING_2), right: (SSPACING_0), bottom: (SSPACING_0)}}
 
-                sequencer = <Sequencer> {width: Fill, height: 300, margin: {top: (SSPACING_3)}}
+                sequencer = <Sequencer> {width: Fill, height: 272, margin: {top: (SSPACING_2)}}
 
                 <Divider> {margin: {top: (SSPACING_2), right: (SSPACING_0), bottom: (SSPACING_0)}}
 
@@ -1973,20 +1973,94 @@ live_design! {
 
     }
 
-    Play = <FishPanel> {
+    // Voice control: mic -> notes + parameter chaos + Life seeding.
+    VoiceSettings = <View> {
         flow: Right,
-        padding: {top: (SSPACING_3)}
-        spacing: (SSPACING_0)
+        padding: <SPACING_0> {} spacing: (SSPACING_2)
         height: Fit,
-        width: Fill,
-        margin: {top: (SSPACING_0), right: (SSPACING_3), bottom: (SSPACING_3), left: (SSPACING_3)}
-        draw_bg: {color_1: (COLOR_UP_3), color_2: (COLOR_UP_1)}
+        width: 300,
+        margin: {left: (SSPACING_2)}
 
-        <Arp> {}
-        <ScrollXView> {
-            piano = <Piano> {height: Fit, width: Fill, margin: {top: (SSPACING_0), right: (SSPACING_2); bottom: (SSPACING_3), left: (SSPACING_2)}}
+        <View> {
+            flow: Down,
+            width: Fill, height: Fit
+            spacing: (SSPACING_2)
+
+            <SubheaderContainer> {
+                margin: <SPACING_0> {}
+                <PixelIcon> { source: (PX_MIC), width: 16, height: 16, margin: {left: 2, right: 4} }
+                <FishSubTitle> {
+                    label = {
+                        text: "Voice",
+                        draw_text: {color: (COLOR_DEFAULT)},
+                    }
+                }
+                <FillerH> {}
+                voice = <FishToggle> {
+                    margin: <SPACING_0> {}
+                    padding: <SPACING_0> {}
+                    checkbox = {
+                        text: " "
+                        padding: {top: (SSPACING_0), right: (SSPACING_1), bottom: (SSPACING_0), left: (SSPACING_0)}
+                        margin: <SPACING_0> {}
+                    }
+                    width: Fit,
+                    height: Fit,
+                    margin: <SPACING_0> {}
+                }
+            }
+
+            voicesens = <InstrumentSlider> {
+                width: Fill,
+                margin: <SPACING_0> {}
+                padding: <SPACING_0> {}
+                slider = {
+                    draw_bg: {line_color: (COLOR_HOT)}
+                    min: 0.0
+                    max: 1.0
+                    default: 0.5
+                    text: "Sensitivity"
+                }
+            }
+            voicechaos = <InstrumentSlider> {
+                width: Fill,
+                margin: <SPACING_0> {}
+                padding: <SPACING_0> {}
+                slider = {
+                    draw_bg: {line_color: (COLOR_FX)}
+                    min: 0.0
+                    max: 1.0
+                    default: 0.35
+                    text: "Chaos"
+                }
+            }
         }
-        <PianoSettings> {}
+
+        // the real photos: cat while listening, Roy while a note sounds
+        <View> {
+            width: 54, height: 96
+            flow: Overlay
+            margin: {top: 2}
+            portrait_cat = <View> {
+                width: Fill, height: Fill
+                <PixelImage> {
+                    width: Fill, height: Fill
+                    fit: Stretch
+                    source: (PHOTO_CAT)
+                    draw_bg: { grid: 40.0, tint: 0.5 }
+                }
+            }
+            portrait_roy = <View> {
+                visible: false
+                width: Fill, height: Fill
+                <PixelImage> {
+                    width: Fill, height: Fill
+                    fit: Stretch
+                    source: (PHOTO_ROY)
+                    draw_bg: { grid: 40.0, tint: 0.5 }
+                }
+            }
+        }
     }
 
 
@@ -2034,6 +2108,24 @@ live_design! {
             }
         }
     }
+
+    Play = <FishPanel> {
+        flow: Right,
+        padding: {top: (SSPACING_3)}
+        spacing: (SSPACING_0)
+        height: Fit,
+        width: Fill,
+        margin: {top: (SSPACING_0), right: (SSPACING_3), bottom: (SSPACING_3), left: (SSPACING_3)}
+        draw_bg: {color_1: (COLOR_UP_3), color_2: (COLOR_UP_1)}
+
+        <Arp> {}
+        <ScrollXView> {
+            piano = <Piano> {height: Fit, width: Fill, margin: {top: (SSPACING_0), right: (SSPACING_2); bottom: (SSPACING_3), left: (SSPACING_2)}}
+        }
+        <PianoSettings> {}
+        <VoiceSettings> {}
+    }
+
 
     FishPanelEffects = <FishPanelContainer> {
         width: Fill,
