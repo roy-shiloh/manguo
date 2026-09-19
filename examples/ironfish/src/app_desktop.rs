@@ -89,7 +89,6 @@ live_design! {
     PX_CELL = dep("crate://self/resources/px/cell.png")
     PX_SPIRAL = dep("crate://self/resources/px/spiral.png")
     PX_CAT = dep("crate://self/resources/px/cat.png")
-    PX_SKULL = dep("crate://self/resources/px/skull.png")
     PX_SEED = dep("crate://self/resources/px/seed.png")
     PX_BG = dep("crate://self/resources/px/bg_hearts.png")
     PHOTO_CAT = dep("crate://self/resources/voice_cat.jpg")
@@ -152,71 +151,47 @@ live_design! {
         draw_bg: { grid: 24.0, tint: 0.0 }
     }
 
-    // The logo: 芒果 rendered to a texture, then rebuilt from big bevelled squares.
-    PixelLogoInner = <CachedRoundedView> {
-        width: 440,
-        height: 400,
-        margin: {top: -94}
-        align: {x: 0.5, y: 0.5}
+    // The logo: 芒果 as a hand-drawn 34x16 pixel bitmap, each set pixel drawn
+    // as a bevelled square.
+    PX_LOGO = dep("crate://self/resources/px/logo_mango.png")
+
+    PixelLogo = <Image> {
+        width: 340,
+        height: 160,
+        source: (PX_LOGO)
+        fit: Stretch
         draw_bg: {
-            instance cellsize: 6.0
             instance glow: 0.0
             fn pixel(self) -> vec4 {
-                let cs = self.cellsize;
-                let p = self.pos * self.rect_size;
-                let cell = floor(p / cs);
-                let uv = (cell + 0.5) * cs / self.rect_size;
-                let c = sample2d_rt(self.image, uv * self.scale + self.shift);
-                if c.w < 0.5 {
+                let grid = vec2(34.0, 16.0);
+                let cell = floor(self.pos * grid);
+                let uv = (cell + 0.5) / grid;
+                let c = sample2d(self.image, uv);
+                if (c.w < 0.5) {
                     return vec4(0.0);
                 }
-                let f = p - cell * cs;
-                let gap = 1.0;
-                if (f.x < gap || f.y < gap) {
+                // position inside the cell, in cell units
+                let f = self.pos * grid - cell;
+                let cs = self.rect_size / grid;
+                let gap = 1.0 / cs;
+                if (f.x < gap.x || f.y < gap.y) {
                     return vec4(0.0);
                 }
-                let light = step(f.x, gap + 1.0) + step(f.y, gap + 1.0);
-                let dark = step(cs - 1.0, f.x) + step(cs - 1.0, f.y);
-                let base = mix((COLOR_HOT), (COLOR_HILITE), self.glow * 0.6);
-                let col = base;
-                if dark > 0.0 {
+                let light = step(f.x, gap.x * 2.0) + step(f.y, gap.y * 2.0);
+                let dark = step(1.0 - gap.x, f.x) + step(1.0 - gap.y, f.y);
+                let col = mix((COLOR_HOT), (COLOR_HILITE), self.glow * 0.6);
+                if (dark > 0.0) {
                     col = (COLOR_MAGENTA) * vec4(0.7, 0.7, 0.7, 1.0);
                 }
-                else if light > 0.0 {
+                else if (light > 0.0) {
                     col = (COLOR_HILITE);
                 }
                 return Pal::premul(vec4(col.xyz, 1.0));
             }
         }
-        glyphs = <Label> {
-            draw_text: {
-                text_style: <THEME_FONT_BOLD> {font_size: 150},
-                color: #fff
-            }
-            text: "芒果"
-        }
     }
 
-    PixelLogo = <View> {
-        width: 440,
-        height: 96,
-        clip_x: true, clip_y: true,
-        logo_inner = <PixelLogoInner> {}
-    }
-
-    // Half-size variant for the life window title
-    PixelLogoSmall = <View> {
-        width: 220,
-        height: 48,
-        clip_x: true, clip_y: true,
-        logo_inner = <PixelLogoInner> {
-            width: 220, height: 200
-            margin: {top: -47}
-            draw_bg: { cellsize: 3.0 }
-            glyphs = { draw_text: { text_style: <THEME_FONT_BOLD> {font_size: 75} } }
-        }
-    }
-
+    PixelLogoSmall = <PixelLogo> { width: 170, height: 80 }
 
     // Square-cornered RoundedView (8-bit: no rounding anywhere)
     SquareView = <RoundedView> {
@@ -1938,36 +1913,11 @@ live_design! {
                     spacing: (SSPACING_1)
                 }
 
-                logo = <PixelLogo> {}
+                logo = <PixelLogo> { width: 272, height: 128 }
 
             }
 
             <FillerV> {}
-
-            <View> {
-                width: Fill,
-                height: 35
-                spacing: (SSPACING_1)
-
-
-                prev = <IconButton> {draw_icon: {svg_file: (ICO_PREV)} icon_walk: {width: Fit, height: 11.0}, margin: {top: 3.25, right: -10.0, bottom: 0.0, left: 0.0}}
-                presets = <IconButton> {draw_icon: {svg_file: (ICO_PRESET)} icon_walk: {width: Fit, height: 17.5}, margin: 0.0}
-                next = <IconButton> {draw_icon: {svg_file: (ICO_NEXT)}, icon_walk: {width: Fit, height: 11.0}, margin: {top: 3.25, right: 0.0, bottom: 0.0, left: -10.0}}
-
-                panic = <IconButton> {draw_icon: {svg_file: (ICO_PANIC)} icon_walk: {width: Fit, height: 17.0}, margin: {left: 5.0, right: -10.0}}
-                platformtoggle = <IconButton> {draw_icon: {svg_file: (ICO_PLAT_MOBILE)} icon_walk: {width: Fit, height: 18.5}}
-
-                gitlink = <Label> {
-                    draw_text: {text_style: <H2_TEXT_REGULAR> {}, color: (COLOR_UP_5)}
-                    text: "Made with Makepad\ngithub.com/makepad/makepad"
-                    margin: {top: 7.5, left: 5.0}
-                }
-
-                <FillerH> {}
-
-                undo = <IconButton> {draw_icon: {svg_file: (ICO_UNDO)} icon_walk: {width: Fit, height: 15.0}, margin: {top: 3.25, right: -5.0, bottom: 0.0, left: 0.0}}
-                redo = <IconButton> {draw_icon: {svg_file: (ICO_REDO)} icon_walk: {width: Fit, height: 15.0}, margin: {top: 3.25, right: 0.0, bottom: 0.0, left: -5.0}}
-            }
 
         }
 
@@ -2221,13 +2171,17 @@ live_design! {
                                 let wave = sample2d(self.wave_texture, vec2(qpos.x / self.rect_size.x, step));
                                 let right = (wave.y + wave.z / 256.0 - 0.5) * 3.0;
                                 let left = (wave.w + wave.x / 256.0 - 0.5) * 3.0;
-                                let audio = clamp((left + right) * 0.5 - 0.01, -0.45, 0.45);
-                                let audio = floor(audio * half / px) * px / half;
-                                let thick = abs(audio) * half * 2.0;
-                                sdf.hline(half + audio * half * 2.0, max(thick, px) * step(0.001, thick));
-                                let t = step * 4.0;
-                                let color = mix((COLOR_HOT), (COLOR_FX), t);
-                                sdf.fill(vec4(color.xyz, 0.35 - t * 0.2))
+                                // 0x8000 (digital silence) decodes to +0.00588 through the u8 texture
+                                let raw = clamp((left + right) * 0.5 - 0.00588, -0.45, 0.45);
+                                // silence draws nothing
+                                if (abs(raw) > 0.004) {
+                                    let audio = floor(raw * half / px) * px / half;
+                                    let thick = abs(audio) * half * 2.0;
+                                    sdf.hline(half + audio * half * 2.0, max(thick, px));
+                                    let t = step * 4.0;
+                                    let color = mix((COLOR_HOT), (COLOR_FX), t);
+                                    sdf.fill(vec4(color.xyz, 0.35 - t * 0.2))
+                                }
                                 step += 1.0 / 16.0;
                             }
                             return sdf.result

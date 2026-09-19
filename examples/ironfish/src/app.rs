@@ -364,11 +364,6 @@ impl MatchEvent for App {
             );
         }
 
-        if ui.button_set(ids!(panic)).clicked(&actions) {
-            cx.midi_reset();
-            self.audio_graph.all_notes_off();
-        }
-
         let sequencer = ui.sequencer(id!(sequencer));
 
         if ui.button_set(ids!(clear_grid)).clicked(&actions) {
