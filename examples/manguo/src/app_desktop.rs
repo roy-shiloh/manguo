@@ -6,7 +6,7 @@ live_design! {
     use link::shaders::*
 
     use manguo::sequencer::Sequencer;
-    use manguo::life_fractal::LifeFractal;
+    use manguo::mandelbrot::Mandelbrot;
     use makepad_audio_widgets::display_audio::DisplayAudio;
     use makepad_audio_widgets::piano::Piano;
 
@@ -2326,7 +2326,7 @@ live_design! {
             fractal_page = <View> {
                 visible: false
                 width: Fill, height: Fill
-                fractal = <LifeFractal> { width: Fill, height: Fill }
+                fractal = <Mandelbrot> { width: Fill, height: Fill }
             }
         }
 

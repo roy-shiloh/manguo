@@ -2,7 +2,7 @@ use crate::makepad_platform::live_atomic::AtomicGetSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use crate::{
-    granular::*, life::*, life_fractal::*, makepad_audio_graph::*, mic_ring::MIC_RING, makepad_audio_widgets::display_audio::*,
+    granular::*, life::*, mandelbrot::*, makepad_audio_graph::*, mic_ring::MIC_RING, makepad_audio_widgets::display_audio::*,
     makepad_audio_widgets::piano::*, makepad_synth_ironfish::ironfish::*, makepad_widgets::*,
     sequencer::*,
 };
@@ -136,7 +136,7 @@ impl LiveRegister for App {
         crate::makepad_synth_ironfish::live_design(cx);
         crate::granular::live_design(cx);
         crate::sequencer::live_design(cx);
-        crate::life_fractal::live_design(cx);
+        crate::mandelbrot::live_design(cx);
         crate::app_desktop::live_design(cx);
     }
 }
@@ -429,9 +429,6 @@ impl MatchEvent for App {
         }
         if ui.button_set(ids!(lifewindow.button)).clicked(&actions) {
             ui.window(id!(life_window)).open(cx);
-            // make sure the fractal has the current grid
-            let grid = self.life_grid();
-            ui.life_fractal(id!(fractal)).set_grid(cx, &grid);
         }
         if ui.button(id!(tab_grid)).clicked(&actions) {
             self.set_life_mode(cx, false);
@@ -440,7 +437,7 @@ impl MatchEvent for App {
             self.set_life_mode(cx, true);
         }
         if let Some(v) = ui.slider(id!(zoomspeed.slider)).slided(&actions) {
-            ui.life_fractal(id!(fractal)).set_speed(v as f32);
+            ui.mandelbrot(id!(fractal)).set_speed(v as f32);
         }
 
         let mut db = DataBindingStore::new();
@@ -632,7 +629,7 @@ impl App {
         let pitch = self.voice.shared.pitch();
         self.voice.smoothed_level += (level - self.voice.smoothed_level) * 0.3;
         let now = cx.seconds_since_app_start();
-        self.ui.life_fractal(id!(fractal)).set_voice_level((self.voice.smoothed_level / self.voice.threshold.max(1e-3)).min(3.0) / 3.0);
+        self.ui.mandelbrot(id!(fractal)).set_voice_level((self.voice.smoothed_level / self.voice.threshold.max(1e-3)).min(3.0) / 3.0);
         if !self.voice.enabled {
             return;
         }
@@ -745,7 +742,6 @@ impl App {
             granular.settings.steps[i].set(*s);
         }
         self.ui.sequencer_set(ids!(sequencer)).set_steps(cx, &steps);
-        self.ui.life_fractal(id!(fractal)).set_grid(cx, life);
         self.ui.redraw(cx);
     }
 
@@ -807,10 +803,7 @@ impl App {
     fn set_life_mode(&mut self, cx: &mut Cx, fractal: bool) {
         self.ui.view(id!(grid_page)).set_visible(cx, !fractal);
         self.ui.view(id!(fractal_page)).set_visible(cx, fractal);
-        let grid = self.life_grid();
-        let f = self.ui.life_fractal(id!(fractal));
-        f.set_grid(cx, &grid);
-        f.set_running(cx, fractal);
+        self.ui.mandelbrot(id!(fractal)).set_running(cx, fractal);
         self.ui.redraw(cx);
     }
 
@@ -824,6 +817,7 @@ impl App {
             next.stamp(p, x, y, seed);
         }
         self.life.generation += 1;
+        self.ui.mandelbrot(id!(fractal)).on_generation();
         self.write_life_grid(cx, &next);
     }
 }

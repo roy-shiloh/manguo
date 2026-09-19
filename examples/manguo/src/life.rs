@@ -62,10 +62,6 @@ impl Life {
         self.cells.iter().all(|c| *c == 0)
     }
 
-    pub fn population(&self) -> u32 {
-        self.cells.iter().map(|c| c.count_ones()).sum()
-    }
-
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> bool {
         self.cells[x % W] & (1 << (y % H)) != 0
@@ -126,25 +122,5 @@ impl Life {
         for (dx, dy) in shape {
             self.set(x + dx, y + dy, true);
         }
-    }
-
-    /// Random live cell, if any.
-    pub fn random_live_cell(&self, seed: &mut u32) -> Option<(usize, usize)> {
-        let pop = self.population();
-        if pop == 0 {
-            return None;
-        }
-        let mut k = next_u32(seed) % pop;
-        for x in 0..W {
-            for y in 0..H {
-                if self.get(x, y) {
-                    if k == 0 {
-                        return Some((x, y));
-                    }
-                    k -= 1;
-                }
-            }
-        }
-        None
     }
 }

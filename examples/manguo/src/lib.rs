@@ -10,7 +10,7 @@ pub use makepad_widgets::makepad_draw;
 pub mod app;
 mod sequencer;
 mod life;
-mod life_fractal;
+pub mod mandelbrot;
 mod mic_ring;
 pub mod granular;
 mod app_desktop;
