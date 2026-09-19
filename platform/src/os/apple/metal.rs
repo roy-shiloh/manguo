@@ -509,10 +509,13 @@ impl Cx {
                 } else { None };
                 let () = unsafe {msg_send![command_buffer, presentDrawable: drawable]};
                 self.commit_command_buffer(None, command_buffer, gpu_read_guards);
-                if let (Some(path), Some((dst, w, h))) = (grab, grab_dst) {
+                if let (Some((path, exit_after)), Some((dst, w, h))) = (grab, grab_dst) {
                     let () = unsafe {msg_send![command_buffer, waitUntilCompleted]};
                     Self::write_ppm(&path, dst, w, h);
-                    std::process::exit(0);
+                    let () = unsafe {msg_send![dst, release]};
+                    if exit_after {
+                        std::process::exit(0);
+                    }
                 }
             }
             DrawPassMode::Resizing(drawable) => {
@@ -524,18 +527,29 @@ impl Cx {
         let () = unsafe {msg_send![pool, release]};
     }
 
-    fn grab_ppm_target(pass_id: PassId, passes: &crate::pass::CxPassPool) -> Option<String> {
+    /// Returns (path, exit_after). `MAKEPAD_GRAB_PPM` grabs one frame and
+    /// exits; `MAKEPAD_GRAB_SERIES=<dir>` grabs every `MAKEPAD_GRAB_DELAY_FRAMES`
+    /// presented frames of every window into `<dir>/w<win>_<n>.ppm` and keeps running.
+    fn grab_ppm_target(pass_id: PassId, passes: &crate::pass::CxPassPool) -> Option<(String, bool)> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static FRAMES: AtomicUsize = AtomicUsize::new(0);
+        static SERIES_N: AtomicUsize = AtomicUsize::new(0);
+        let delay: usize = std::env::var("MAKEPAD_GRAB_DELAY_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        let crate::pass::CxPassParent::Window(window_id) = passes[pass_id].parent else { return None };
+        if let Ok(dir) = std::env::var("MAKEPAD_GRAB_SERIES") {
+            let n = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % delay.max(1) == 0 {
+                let k = SERIES_N.fetch_add(1, Ordering::Relaxed);
+                return Some((format!("{}/w{}_{:04}.ppm", dir, window_id.id(), k), false));
+            }
+            return None;
+        }
         let path = std::env::var("MAKEPAD_GRAB_PPM").ok()?;
         let want: usize = std::env::var("MAKEPAD_GRAB_WINDOW").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        if let crate::pass::CxPassParent::Window(window_id) = passes[pass_id].parent {
-            if window_id.id() == want {
-                // let the app settle for a few presented frames first
-                use std::sync::atomic::{AtomicUsize, Ordering};
-                static FRAMES: AtomicUsize = AtomicUsize::new(0);
-                let delay: usize = std::env::var("MAKEPAD_GRAB_DELAY_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
-                if FRAMES.fetch_add(1, Ordering::Relaxed) + 1 >= delay {
-                    return Some(path);
-                }
+        if window_id.id() == want {
+            // let the app settle for a few presented frames first
+            if FRAMES.fetch_add(1, Ordering::Relaxed) + 1 >= delay {
+                return Some((path, true));
             }
         }
         None

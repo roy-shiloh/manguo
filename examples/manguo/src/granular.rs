@@ -93,7 +93,7 @@ pub struct GranularSettings {
 #[derive(Default)]
 pub struct GranularShared {
     pub current_step: AtomicU32,
-    /// peak grain level of the last buffer, f32 bits
+    /// peak grain level since the UI last read it (`take_grain_level`), f32 bits
     pub grain_level: AtomicU32,
 }
 
@@ -363,7 +363,8 @@ impl AudioGraphNode for Node {
             }
         }
         self.mic_read = Some(rp);
-        self.shared.grain_level.store(peak.to_bits(), Ordering::Relaxed);
+        // hold the max until the UI reads (positive f32 bits order like the floats)
+        self.shared.grain_level.fetch_max(peak.to_bits(), Ordering::Relaxed);
         if let Some(d) = disp {
             display.send_buffer(peak > 0.0005, 16, d);
         }
@@ -373,5 +374,10 @@ impl AudioGraphNode for Node {
 impl GranularDelay {
     pub fn current_step(&self) -> usize {
         self.shared.current_step.load(Ordering::Relaxed) as usize
+    }
+
+    /// Peak grain level since the last call.
+    pub fn take_grain_level(&self) -> f32 {
+        f32::from_bits(self.shared.grain_level.swap(0, Ordering::Relaxed))
     }
 }

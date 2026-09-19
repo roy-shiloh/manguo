@@ -113,6 +113,9 @@ pub struct LifeControl {
     /// dev: MANGUO_LOG_GRAINS logs grain peaks once a second
     pub log_grains: bool,
     pub last_grain_log: f64,
+    /// dev: MANGUO_QA scripted run
+    pub qa_timer: Timer,
+    pub qa_step: usize,
 }
 
 #[derive(Live)]
@@ -344,6 +347,10 @@ impl MatchEvent for App {
             self.set_voice_enabled(cx, true);
         }
         self.life.log_grains = std::env::var("MANGUO_LOG_GRAINS").is_ok();
+        if std::env::var("MANGUO_QA").is_ok() {
+            log!("QA: start");
+            self.qa_schedule(cx, 1.0);
+        }
         if let Ok(mode) = std::env::var("MANGUO_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
             self.set_life_enabled(cx, true);
@@ -358,17 +365,6 @@ impl MatchEvent for App {
         
         let ui = self.ui.clone();
         let piano = ui.piano(id!(piano));
-
-        ui.radio_button_set(ids!(oscillators.tab1, oscillators.tab2,))
-            .selected_to_visible(cx, &ui, actions, ids!(oscillators.osc1, oscillators.osc2,));
-
-        ui.radio_button_set(ids!(filter_modes.tab1, filter_modes.tab2,))
-            .selected_to_visible(
-                cx,
-                &ui,
-                actions,
-                ids!(preset_pages.tab1_frame, preset_pages.tab2_frame,),
-            );
 
         for note in piano.notes_played(&actions) {
             self.audio_graph.send_midi_data(
@@ -477,11 +473,13 @@ impl MatchEvent for App {
         // grain sequencer playhead
         let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
         if self.life.log_grains {
-            let lvl = f32::from_bits(granular.shared.grain_level.load(Ordering::Relaxed));
             let now = cx.seconds_since_app_start();
-            if lvl > 0.001 && now - self.life.last_grain_log > 1.0 {
+            if now - self.life.last_grain_log > 1.0 {
                 self.life.last_grain_log = now;
-                log!("grains: step {} peak {:.3}", granular.current_step(), lvl);
+                let lvl = granular.take_grain_level();
+                if lvl > 0.001 {
+                    log!("grains: step {} peak {:.3}", granular.current_step(), lvl);
+                }
             }
         }
         let step = granular.current_step();
@@ -822,10 +820,98 @@ impl App {
     }
 }
 
+// Scripted QA run (MANGUO_QA=1): walks the app through its states on a timer,
+// logging each step; pair with MAKEPAD_GRAB_SERIES for frame evidence.
+impl App {
+    fn qa_schedule(&mut self, cx: &mut Cx, secs: f64) {
+        self.life.qa_timer = cx.start_timeout(secs);
+    }
+
+    fn qa_step(&mut self, cx: &mut Cx) {
+        let ui = self.ui.clone();
+        let step = self.life.qa_step;
+        self.life.qa_step += 1;
+        let next;
+        match step {
+            0..=7 => {
+                log!("QA: preset {}", step);
+                self.preset(cx, step, false);
+                next = 0.35;
+            }
+            8 => {
+                log!("QA: voice on (test tone runs for its configured seconds)");
+                self.set_voice_enabled(cx, true);
+                next = 3.0;
+            }
+            9 => {
+                log!("QA: life on + window open (grid)");
+                self.set_life_enabled(cx, true);
+                ui.window(id!(life_window)).open(cx);
+                self.set_life_mode(cx, false);
+                next = 2.0;
+            }
+            10 => {
+                log!("QA: fractal mode");
+                self.set_life_mode(cx, true);
+                next = 4.0;
+            }
+            11..=30 => {
+                // stress: close / reopen the life window rapidly
+                let open = step % 2 == 0;
+                log!("QA: life window {}", if open { "open" } else { "close" });
+                if open {
+                    ui.window(id!(life_window)).open(cx);
+                } else {
+                    ui.window(id!(life_window)).close(cx);
+                }
+                next = 0.3;
+            }
+            31 => {
+                log!("QA: back to grid mode, window open");
+                ui.window(id!(life_window)).open(cx);
+                self.set_life_mode(cx, false);
+                next = 1.0;
+            }
+            32..=37 => {
+                // granular parameter sweep
+                let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+                let t = (step - 32) as f32 / 5.0;
+                granular.settings.delay_steps.set(1.0 + 15.0 * t);
+                granular.settings.grain_len.set(t);
+                granular.settings.spray.set(1.0 - t);
+                granular.settings.feedback.set(0.9 * t);
+                granular.settings.wet.set(0.3 + 0.7 * t);
+                granular.settings.bpm.set(60.0 + 180.0 * t);
+                log!("QA: grain sweep t={:.1}", t);
+                self.init_ui_state(cx);
+                if self.life.enabled {
+                    self.restart_life_timer(cx);
+                }
+                next = 0.6;
+            }
+            38 => {
+                log!("QA: voice off, life off, window closed");
+                self.set_voice_enabled(cx, false);
+                self.set_life_enabled(cx, false);
+                ui.window(id!(life_window)).close(cx);
+                next = 1.0;
+            }
+            _ => {
+                log!("QA: done");
+                std::process::exit(0);
+            }
+        }
+        self.qa_schedule(cx, next);
+    }
+}
+
 impl AppMain for App {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
         self.match_event(cx, event);
         if let Event::Timer(te) = event {
+            if self.life.qa_timer.is_timer(te).is_some() {
+                self.qa_step(cx);
+            }
             if self.life.timer.is_timer(te).is_some() && self.life.enabled {
                 self.life_tick(cx);
             }

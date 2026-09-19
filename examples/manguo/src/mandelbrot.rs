@@ -41,7 +41,7 @@ live_design! {
 
 pub const TILE_SIZE_X: usize = 256;
 pub const TILE_SIZE_Y: usize = 256;
-pub const TILE_CACHE_SIZE: usize = 1200;
+pub const TILE_CACHE_SIZE: usize = 300;
 const MIN_ZOOM: f64 = 3e-13; // f64 precision floor for 256px tiles
 const MAX_ZOOM: f64 = 2.0;
 
