@@ -97,15 +97,13 @@ impl Default for VoiceControl {
     }
 }
 
-/// Game of Life running inside the sequencer grid.
+/// UI-side state for the Life grain delay (the grid itself lives on the audio thread).
 #[derive(Default)]
 pub struct LifeControl {
     pub enabled: bool,
-    /// Sequencer steps per Life generation (1..=16).
-    pub steps_per_gen: u32,
-    pub timer: Timer,
     pub seed: u32,
-    pub generation: u64,
+    /// last generation counter seen from the audio thread
+    pub last_generation: u32,
     /// dev: one-shot timer that closes the life window (MANGUO_CLOSE_LIFE_AFTER)
     pub test_close_timer: Timer,
     /// last playhead column shown
@@ -113,9 +111,10 @@ pub struct LifeControl {
     /// dev: MANGUO_LOG_GRAINS logs grain peaks once a second
     pub log_grains: bool,
     pub last_grain_log: f64,
-    /// dev: MANGUO_QA scripted run
+    /// dev: MANGUO_QA / MANGUO_AUDIO_QA scripted runs
     pub qa_timer: Timer,
     pub qa_step: usize,
+    pub audio_qa: bool,
 }
 
 #[derive(Live)]
@@ -126,7 +125,7 @@ pub struct App {
     audio_graph: AudioGraph,
     #[rust]
     midi_input: MidiInput,
-    #[rust(LifeControl { steps_per_gen: 4, seed: 0xC0FFEE, ..Default::default() })]
+    #[rust(LifeControl { seed: 0xC0FFEE, ..Default::default() })]
     life: LifeControl,
     #[rust]
     voice: VoiceControl,
@@ -167,12 +166,11 @@ impl App {
     pub fn granular_bind(mut db: DataBindingMap) {
         db.bind(id!(steps), ids!(sequencer));
         db.bind(id!(running), ids!(playpause));
-        db.bind(id!(bpm), ids!(speed.slider));
+        db.bind(id!(time), ids!(delaytime.slider));
+        db.bind(id!(repeats), ids!(repeats.slider));
+        db.bind(id!(smear), ids!(smear.slider));
+        db.bind(id!(mode), ids!(delaymode.dropdown));
         db.bind(id!(scale), ids!(scaletype.dropdown));
-        db.bind(id!(delay_steps), ids!(graindelay.slider));
-        db.bind(id!(grain_len), ids!(grainlen.slider));
-        db.bind(id!(spray), ids!(grainspray.slider));
-        db.bind(id!(feedback), ids!(grainfeedback.slider));
         db.bind(id!(wet), ids!(grainwet.slider));
         db.bind(id!(voice_gain), ids!(mixvoice.slider));
         db.bind(id!(synth_gain), ids!(mixsynth.slider));
@@ -340,16 +338,20 @@ impl MatchEvent for App {
         self.preset(cx,0,false);
         self.ui.piano(id!(piano)).set_key_focus(cx);
         self.midi_input = cx.midi_input();
-        self.ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
         self.start_voice_input(cx);
         // Dev/verification: MANGUO_OPEN_LIFE=grid|fractal opens the life window running.
-        if std::env::var("MANGUO_VOICE_TEST").is_ok() {
+        if std::env::var("MANGUO_VOICE_TEST").is_ok() && std::env::var("MANGUO_AUDIO_QA").is_err() {
             self.set_voice_enabled(cx, true);
         }
         self.life.log_grains = std::env::var("MANGUO_LOG_GRAINS").is_ok();
         if std::env::var("MANGUO_QA").is_ok() {
             log!("QA: start");
             self.qa_schedule(cx, 1.0);
+        }
+        if std::env::var("MANGUO_AUDIO_QA").is_ok() {
+            log!("AQA: start");
+            self.life.audio_qa = true;
+            self.qa_schedule(cx, 0.5);
         }
         if let Ok(mode) = std::env::var("MANGUO_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
@@ -413,13 +415,6 @@ impl MatchEvent for App {
         if let Some(on) = life_toggled {
             self.set_life_enabled(cx, on);
         }
-        if let Some(v) = ui.slider_set(ids!(liferate.slider)).slided(&actions) {
-            self.life.steps_per_gen = (v.round() as u32).clamp(1, 16);
-            ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
-            if self.life.enabled {
-                self.restart_life_timer(cx);
-            }
-        }
         if ui.button_set(ids!(lifeseed.button)).clicked(&actions) {
             self.life_seed(cx);
         }
@@ -445,11 +440,6 @@ impl MatchEvent for App {
         gdb.data_bind(cx, actions, &ui, Self::granular_bind);
         let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
         granular.settings.apply_over(cx, &gdb.nodes);
-
-        // bpm changed while Life runs: retime the generation clock
-        if self.life.enabled && ui.slider_set(ids!(speed.slider)).slided(&actions).is_some() {
-            self.restart_life_timer(cx);
-        }
     }
 
     fn handle_midi_ports(&mut self, cx: &mut Cx, ports: &MidiPortsEvent) {
@@ -478,14 +468,25 @@ impl MatchEvent for App {
                 self.life.last_grain_log = now;
                 let lvl = granular.take_grain_level();
                 if lvl > 0.001 {
-                    log!("grains: step {} peak {:.3}", granular.current_step(), lvl);
+                    log!("grains: slot {} gen {} peak {:.3}", granular.current_slot(), granular.generation(), lvl);
                 }
             }
         }
-        let step = granular.current_step();
+        let step = granular.current_slot();
         if step != self.life.last_step {
             self.life.last_step = step;
             self.ui.sequencer_set(ids!(sequencer)).set_step(cx, step);
+        }
+        // a generation ran on the audio thread: mirror the grid, shift the fractal palette
+        let gen = granular.generation();
+        if gen != self.life.last_generation {
+            self.life.last_generation = gen;
+            let steps: Vec<u32> = (0..16).map(|i| granular.settings.steps[i].get()).collect();
+            self.ui.sequencer_set(ids!(sequencer)).set_steps(cx, &steps);
+            self.ui.mandelbrot(id!(fractal)).on_generation();
+            if self.life.enabled && steps.iter().all(|s| *s == 0) && !self.life.audio_qa {
+                self.life_seed(cx);
+            }
         }
     }
 }
@@ -500,15 +501,20 @@ impl App {
         let mut ring = [0.0f32; N];
         let mut write = 0usize;
         let mut scratch = [0.0f32; N];
-        // Dev/verification: MANGUO_VOICE_TEST=<hz>[:<seconds>] replaces the
-        // mic with a synthetic "sung" tone (optionally stopping after N seconds)
-        // so the whole chain can be exercised headless.
-        let (test_hz, test_secs): (Option<f32>, f32) = match std::env::var("MANGUO_VOICE_TEST") {
+        // Dev/verification: MANGUO_VOICE_TEST=<hz>[:<on_secs>[:<period_secs>]]
+        // replaces the mic with a synthetic "sung" tone: on for `on_secs`,
+        // repeating every `period_secs` (default: once), so the whole chain
+        // can be exercised headless.
+        let (test_hz, test_secs, test_period): (Option<f32>, f32, f32) = match std::env::var("MANGUO_VOICE_TEST") {
             Ok(v) => {
                 let mut it = v.split(':');
-                (it.next().and_then(|h| h.parse().ok()), it.next().and_then(|s| s.parse().ok()).unwrap_or(f32::INFINITY))
+                (
+                    it.next().and_then(|h| h.parse().ok()),
+                    it.next().and_then(|s| s.parse().ok()).unwrap_or(f32::INFINITY),
+                    it.next().and_then(|s| s.parse().ok()).unwrap_or(f32::INFINITY),
+                )
             }
-            Err(_) => (None, 0.0),
+            Err(_) => (None, 0.0, 0.0),
         };
         let mut phase = 0.0f32;
         let mut test_frames = 0u64;
@@ -526,8 +532,15 @@ impl App {
                 if let Some(hz) = test_hz {
                     test_frames += 1;
                     phase = (phase + hz / 48000.0).fract();
-                    s = if (test_frames as f32) < test_secs * 48000.0 {
-                        0.2 * (phase * std::f32::consts::TAU).sin() + 0.08 * (phase * 2.0 * std::f32::consts::TAU).sin()
+                    let t = test_frames as f32 / 48000.0;
+                    let in_burst = if test_period.is_finite() { t % test_period < test_secs } else { t < test_secs };
+                    s = if in_burst {
+                        // band-limited saw: 12 harmonics, so darkening is measurable
+                        let mut acc = 0.0f32;
+                        for h in 1..=12u32 {
+                            acc += (phase * h as f32 * std::f32::consts::TAU).sin() / h as f32;
+                        }
+                        acc * 0.16
                     } else { 0.0 };
                 }
                 sum += s * s;
@@ -743,32 +756,19 @@ impl App {
         self.ui.redraw(cx);
     }
 
-    fn life_interval(&mut self) -> f64 {
-        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
-        let bpm = granular.settings.bpm.get().max(20.0) as f64;
-        // one sequencer step is a 16th note
-        60.0 / bpm / 4.0 * self.life.steps_per_gen.max(1) as f64
-    }
-
-    fn restart_life_timer(&mut self, cx: &mut Cx) {
-        cx.stop_timer(self.life.timer);
-        self.life.timer = cx.start_interval(self.life_interval());
-    }
-
     fn set_life_enabled(&mut self, cx: &mut Cx, on: bool) {
         self.life.enabled = on;
         self.ui.check_box_set(ids!(life.checkbox)).set_active(cx, on);
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        granular.settings.life.set(on);
         if on {
             if self.life_grid().is_empty() {
                 self.life_seed(cx);
             }
-            // make the cells audible
+            // generations only happen while the delay runs
             let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
             granular.settings.running.set(true);
             self.ui.check_box_set(ids!(playpause)).set_active(cx, true);
-            self.restart_life_timer(cx);
-        } else {
-            cx.stop_timer(self.life.timer);
         }
     }
 
@@ -786,13 +786,15 @@ impl App {
         self.write_life_grid(cx, &grid);
     }
 
-    /// Stamp a pattern at a chosen row (used by voice control).
+    /// Stamp a pattern at a chosen row, starting at the playhead so the next
+    /// slots of input get recorded into it (used by voice control).
     pub fn life_stamp_at_row(&mut self, cx: &mut Cx, row: usize, count: usize) {
+        let slot = self.audio_graph.by_type::<GranularDelay>().unwrap().current_slot();
         let mut grid = self.life_grid();
         let seed = &mut self.life.seed;
-        for _ in 0..count {
+        for i in 0..count {
             let p = Pattern::pick(seed);
-            let x = (next_u32(seed) % W as u32) as usize;
+            let x = (slot + 1 + i * 4) % W;
             grid.stamp(p, x, row.min(H - 1), seed);
         }
         self.write_life_grid(cx, &grid);
@@ -804,19 +806,102 @@ impl App {
         self.ui.mandelbrot(id!(fractal)).set_running(cx, fractal);
         self.ui.redraw(cx);
     }
+}
 
-    fn life_tick(&mut self, cx: &mut Cx) {
-        let mut next = self.life_grid().step();
-        if next.is_empty() {
-            let seed = &mut self.life.seed;
-            let p = Pattern::pick(seed);
-            let x = (next_u32(seed) % W as u32) as usize;
-            let y = (next_u32(seed) % H as u32) as usize;
-            next.stamp(p, x, y, seed);
+// Scripted audio QA (MANGUO_AUDIO_QA=1 with MANGUO_RECORD_WAV=<dir> and
+// MANGUO_VOICE_TEST=262:3:8): drives the grain delay through its modes with a
+// fixed grid while the node records input / repeats / output stems.
+impl App {
+    fn aqa_grid(&mut self, cx: &mut Cx, cells: &[(usize, usize)]) {
+        let mut grid = Life::default();
+        for (x, y) in cells {
+            grid.set(*x, *y, true);
         }
-        self.life.generation += 1;
-        self.ui.mandelbrot(id!(fractal)).on_generation();
-        self.write_life_grid(cx, &next);
+        self.write_life_grid(cx, &grid);
+    }
+
+    fn aqa_step(&mut self, cx: &mut Cx) {
+        let step = self.life.qa_step;
+        self.life.qa_step += 1;
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        granular.shared.marker.store(step as u32 + 1, Ordering::Relaxed);
+        let g = granular.settings.clone();
+        let next;
+        match step {
+            0 => {
+                log!("AQA: A digital, time 0.5, repeats 0.7, life off");
+                g.mode.set(DelayMode::Digital);
+                g.time.set(0.5);
+                g.repeats.set(0.7);
+                g.smear.set(2.0);
+                g.wet.set(0.8);
+                g.life.set(false);
+                g.running.set(true);
+                next = 1.5; // t = 2.0, inside burst 1 (0..3)
+            }
+            1 => {
+                log!("AQA: A stamp unison row 8, columns 4..6");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 5.0; // t = 7.0
+            }
+            2 => {
+                log!("AQA: B analog, repeats 0.95 (self-oscillation)");
+                self.aqa_grid(cx, &[]);
+                g.mode.set(DelayMode::Analog);
+                g.repeats.set(0.95);
+                next = 1.5; // t = 8.5, inside burst 2 (8..11)
+            }
+            3 => {
+                log!("AQA: B stamp");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 6.5; // t = 15.0
+            }
+            4 => {
+                log!("AQA: C tape, repeats 0.6");
+                self.aqa_grid(cx, &[]);
+                g.mode.set(DelayMode::Tape);
+                g.repeats.set(0.6);
+                next = 1.5; // t = 16.5, inside burst 3 (16..19)
+            }
+            5 => {
+                log!("AQA: C stamp");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 6.5; // t = 23.0
+            }
+            6 => {
+                log!("AQA: D digital, repeats 0.8, life on");
+                self.aqa_grid(cx, &[]);
+                g.mode.set(DelayMode::Digital);
+                g.repeats.set(0.8);
+                g.life.set(true);
+                self.life.enabled = true;
+                next = 1.5; // t = 24.5, inside burst 4 (24..27)
+            }
+            7 => {
+                log!("AQA: D stamp glider + blinker");
+                self.aqa_grid(cx, &[(4, 7), (5, 8), (3, 9), (4, 9), (5, 9), (13, 2), (13, 3), (13, 4)]);
+                next = 7.0; // t = 31.5
+            }
+            8 => {
+                log!("AQA: stop recording");
+                granular.shared.record_stop.store(1, Ordering::Relaxed);
+                next = 1.0;
+            }
+            _ => {
+                let frames = granular.shared.frames.load(Ordering::Relaxed);
+                log!(
+                    "AQA: perf max_render_us={} frames={} buffer_us={} underruns={} written={}",
+                    granular.shared.max_render_us.load(Ordering::Relaxed),
+                    frames,
+                    frames as f64 / 48000.0 * 1e6,
+                    granular.shared.mic_underruns.load(Ordering::Relaxed),
+                    granular.shared.record_stop.load(Ordering::Relaxed) == 2
+                );
+                log!("AQA: done");
+                std::process::exit(0);
+            }
+        }
+        self.qa_schedule(cx, next);
     }
 }
 
@@ -876,18 +961,14 @@ impl App {
                 // granular parameter sweep
                 let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
                 let t = (step - 32) as f32 / 5.0;
-                granular.settings.delay_steps.set(1.0 + 15.0 * t);
-                granular.settings.grain_len.set(t);
-                granular.settings.spray.set(1.0 - t);
-                granular.settings.feedback.set(0.9 * t);
+                granular.settings.time.set(0.1 + 1.9 * t);
+                granular.settings.repeats.set(t);
+                granular.settings.smear.set(1.0 + 3.0 * t);
                 granular.settings.wet.set(0.3 + 0.7 * t);
-                granular.settings.bpm.set(60.0 + 180.0 * t);
-                log!("QA: grain sweep t={:.1}", t);
+                granular.settings.mode.set(match step % 3 { 0 => DelayMode::Digital, 1 => DelayMode::Analog, _ => DelayMode::Tape });
+                log!("QA: delay sweep t={:.1} mode {:?}", t, granular.settings.mode.get());
                 self.init_ui_state(cx);
-                if self.life.enabled {
-                    self.restart_life_timer(cx);
-                }
-                next = 0.6;
+                next = 1.2;
             }
             38 => {
                 log!("QA: voice off, life off, window closed");
@@ -910,10 +991,11 @@ impl AppMain for App {
         self.match_event(cx, event);
         if let Event::Timer(te) = event {
             if self.life.qa_timer.is_timer(te).is_some() {
-                self.qa_step(cx);
-            }
-            if self.life.timer.is_timer(te).is_some() && self.life.enabled {
-                self.life_tick(cx);
+                if self.life.audio_qa {
+                    self.aqa_step(cx);
+                } else {
+                    self.qa_step(cx);
+                }
             }
             if self.life.test_close_timer.is_timer(te).is_some() {
                 cx.stop_timer(self.life.test_close_timer);

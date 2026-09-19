@@ -77,8 +77,11 @@ impl Life {
         }
     }
 
-    /// One generation of B3/S23 on a torus.
-    pub fn step(&self) -> Life {
+    /// One generation of B3/S23 on a torus, also reporting for every newborn
+    /// cell which live neighbour it inherits from (`parents[x][y]`, encoded
+    /// `px * H + py`, or `u8::MAX` for survivors / dead cells).
+    /// Allocation-free so it can run on the audio thread.
+    pub fn step_with_parents(&self, parents: &mut [[u8; H]; W]) -> Life {
         let mut next = Life::default();
         for x in 0..W {
             let xl = (x + W - 1) % W;
@@ -86,16 +89,21 @@ impl Life {
             for y in 0..H {
                 let yu = (y + H - 1) % H;
                 let yd = (y + 1) % H;
-                let n = self.get(xl, yu) as u8
-                    + self.get(x, yu) as u8
-                    + self.get(xr, yu) as u8
-                    + self.get(xl, y) as u8
-                    + self.get(xr, y) as u8
-                    + self.get(xl, yd) as u8
-                    + self.get(x, yd) as u8
-                    + self.get(xr, yd) as u8;
+                let nb = [(xl, yu), (x, yu), (xr, yu), (xl, y), (xr, y), (xl, yd), (x, yd), (xr, yd)];
+                let mut n = 0u8;
+                let mut first_parent = u8::MAX;
+                for (px, py) in nb {
+                    if self.get(px, py) {
+                        n += 1;
+                        if first_parent == u8::MAX {
+                            first_parent = (px * H + py) as u8;
+                        }
+                    }
+                }
                 let alive = self.get(x, y);
-                next.set(x, y, matches!((alive, n), (true, 2) | (true, 3) | (false, 3)));
+                let lives = matches!((alive, n), (true, 2) | (true, 3) | (false, 3));
+                next.set(x, y, lives);
+                parents[x][y] = if lives && !alive { first_parent } else { u8::MAX };
             }
         }
         next

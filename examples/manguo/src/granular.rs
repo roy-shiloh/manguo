@@ -1,12 +1,25 @@
-//! Grain sequencer: a granular delay of the microphone, driven by the 16x16
-//! Life grid, mixed with the synth.
+//! Grain delay: a multi-generational time-reflection device (after the
+//! EarthQuaker Devices Silos) whose repeats live in a Game of Life.
 //!
-//! The component is the audio-graph root and owns the synth as a child. On
-//! the audio thread it pulls mic samples from `MIC_RING`, writes them into a
-//! delay line, and on every sequencer step spawns one grain per live cell in
-//! that step's column, reading back `delay_steps` steps into the past and
-//! pitch-shifted by the cell's row (quantized to the selected scale).
+//! * The microphone is chopped into grains one slot long (slot = Time / 16).
+//! * A cell that is born by a voice stamp or a click captures the input slice
+//!   at its column's offset, so a pattern spanning several columns holds the
+//!   consecutive slices of what was just sung.
+//! * Every `Time` seconds a generation runs. Survivors replay their grain,
+//!   one generation older, gain multiplied by Repeats. Newborn cells inherit
+//!   a neighbouring parent's grain, so gliders carry grains across the grid,
+//!   shifting their time slot (column) and pitch (row). Dead cells drop theirs.
+//! * Mode D/A/T degrades a grain by its age like the Silos modes: Digital
+//!   darkens each generation, Analog loses fidelity and self-oscillates at
+//!   high Repeats, Tape saturates harder every cycle depending on input level.
+//! * With Life off the grid is a static multi-tap delay whose taps decay.
+//!
+//! The Life grid is owned by the audio thread. The UI edits it by writing the
+//! `steps` atomics (clicks, seeds, voice stamps); the node diffs them against
+//! its last published grid, capturing fresh input for births, and publishes
+//! the grid back after every generation.
 
+use crate::life::{Life, H, W};
 use crate::makepad_audio_graph::*;
 use crate::makepad_platform::live_atomic::*;
 use crate::makepad_platform::*;
@@ -21,10 +34,11 @@ live_design! {
 }
 
 const SR: f32 = 48000.0;
-const DELAY_LEN: usize = 1 << 19; // ~10.9 s at 48 kHz
-const MAX_GRAINS: usize = 64;
-const GRID_W: usize = 16;
-const GRID_H: usize = 16;
+const CELLS: usize = W * H;
+/// samples stored per cell grain (341 ms at 48 kHz)
+const GRAIN_MAX: usize = 16384;
+const MAX_VOICES: usize = 96;
+const FADE: usize = 240; // 5 ms grain edges
 
 #[derive(Live, LiveHook, PartialEq, LiveAtomic, Debug, LiveRead)]
 pub enum GrainScale {
@@ -45,44 +59,52 @@ impl GrainScale {
         }
     }
 
-    /// Scale degree (may be negative) to semitones.
     fn semitones(&self, degree: i32) -> i32 {
         let iv = self.intervals();
         let n = iv.len() as i32;
-        let oct = degree.div_euclid(n);
-        let idx = degree.rem_euclid(n) as usize;
-        oct * 12 + iv[idx]
+        degree.div_euclid(n) * 12 + iv[degree.rem_euclid(n) as usize]
     }
+}
+
+/// Silos-style repeat character.
+#[derive(Live, LiveHook, PartialEq, LiveAtomic, Debug, LiveRead, Clone, Copy)]
+pub enum DelayMode {
+    #[pick]
+    Digital,
+    Analog,
+    Tape,
 }
 
 #[derive(Live, LiveHook, LiveRegister, LiveAtomic, Debug, LiveRead)]
 #[live_ignore]
 pub struct GranularSettings {
-    /// the Life grid: column = step, bit = row (row 0 is the top / highest pitch)
+    /// the Life grid: column = time slot within one delay period, bit = row
+    /// (row 0 is the top / highest pitch). Written by the UI, published by the node.
     #[live]
     pub steps: [u32a; 16],
-    #[live(125.0)]
-    pub bpm: f32a,
+    /// delay running (generations happen)
     #[live(false)]
     pub running: boola,
+    /// Life rules on; off = static multi-tap delay
+    #[live(false)]
+    pub life: boola,
+    #[live]
+    pub mode: U32A<DelayMode>,
+    /// delay time = one generation, seconds
+    #[live(0.5)]
+    pub time: f32a,
+    /// regeneration gain per generation
+    #[live(0.6)]
+    pub repeats: f32a,
+    /// grain overlap: length in slots (1..4)
+    #[live(2.0)]
+    pub smear: f32a,
     #[live]
     pub scale: U32A<GrainScale>,
-    /// how far back a grain reads, in sequencer steps
-    #[live(4.0)]
-    pub delay_steps: f32a,
-    /// grain length 0..1 -> 30 ms .. 600 ms
-    #[live(0.45)]
-    pub grain_len: f32a,
-    /// random offset of the read position, 0..1 -> 0 .. 2 steps
-    #[live(0.2)]
-    pub spray: f32a,
-    /// grains written back into the delay line
-    #[live(0.3)]
-    pub feedback: f32a,
-    /// grain output level
+    /// repeats level (Mix)
     #[live(0.8)]
     pub wet: f32a,
-    /// dry microphone level (0 by default: speakers would feed back)
+    /// dry microphone level (0: speakers would feed back)
     #[live(0.0)]
     pub voice_gain: f32a,
     #[live(1.0)]
@@ -92,9 +114,22 @@ pub struct GranularSettings {
 /// Published by the audio thread for the UI.
 #[derive(Default)]
 pub struct GranularShared {
-    pub current_step: AtomicU32,
-    /// peak grain level since the UI last read it (`take_grain_level`), f32 bits
+    pub current_slot: AtomicU32,
+    pub generation: AtomicU32,
+    /// peak repeat level since the UI last read it, f32 bits
     pub grain_level: AtomicU32,
+    /// number of live cells
+    pub population: AtomicU32,
+    /// longest render callback so far, microseconds
+    pub max_render_us: AtomicU32,
+    /// frames where the mic ring had nothing new (input starving the output)
+    pub mic_underruns: AtomicU32,
+    /// dev: set to 1 to stop the WAV recording and write it out (2 = written)
+    pub record_stop: AtomicU32,
+    /// frames per render callback
+    pub frames: AtomicU32,
+    /// dev: QA step marker, stamped into the recording timeline
+    pub marker: AtomicU32,
 }
 
 #[derive(Live)]
@@ -122,7 +157,6 @@ impl LiveHook for GranularDelay {
     }
 
     fn apply_value_instance(&mut self, cx: &mut Cx, apply: &mut Apply, index: usize, nodes: &[LiveNode]) -> usize {
-        // the single anonymous child is the synth
         self.synth.apply(cx, apply, index, nodes)
     }
 }
@@ -135,16 +169,22 @@ impl AudioComponent for GranularDelay {
             shared: self.shared.clone(),
             synth,
             synth_buf: AudioBuffer::default(),
-            delay: vec![0.0; DELAY_LEN],
-            write: 0,
-            mic_read: None,
-            grains: [Grain::default(); MAX_GRAINS],
-            samples_to_step: 0,
-            step: GRID_W - 1,
+            grains: vec![0.0; CELLS * GRAIN_MAX],
+            cells: [Cell::default(); CELLS],
+            grid: Life::default(),
+            published: [0u32; W],
+            parents: [[u8::MAX; H]; W],
+            voices: [Voice::default(); MAX_VOICES],
+            samples_to_slot: 0,
+            slot: W - 1,
             was_running: false,
+            mic_read: None,
+            mic_hist: vec![0.0; MIC_HIST],
+            mic_write: 0,
+            input_level: 0.0,
             seed: 0x9E37_79B9,
-            fb_l: 0.0,
-            fb_r: 0.0,
+            rec: std::env::var("MANGUO_RECORD_WAV").ok().map(|dir| Recorder::new(dir, 90)),
+            debug: std::env::var("MANGUO_LOG_GRAINS").is_ok(),
         })
     }
 
@@ -159,16 +199,49 @@ impl AudioComponent for GranularDelay {
     }
 }
 
+/// local mic history so a birth can capture slices from the recent past
+const MIC_HIST: usize = 1 << 17; // 2.7 s
+
 #[derive(Clone, Copy, Default)]
-struct Grain {
+struct Cell {
+    alive: bool,
+    /// born, waiting for the playhead to pass its column and record the slice
+    pending: bool,
+    /// generations since capture
+    age: u32,
+    gain: f32,
+    /// valid samples in the grain
+    len: usize,
+    /// per-cell wow phase (tape)
+    phase: f32,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Voice {
     active: bool,
-    /// absolute read position in delay-line frames (fractional)
+    cell: usize,
+    /// read position in the cell grain, fractional
     pos: f64,
     rate: f64,
-    len: u32,
-    age: u32,
+    len: usize,
+    gain: f32,
     gain_l: f32,
     gain_r: f32,
+    mode: u8,
+    /// one-pole low-pass state and coefficient (fixed per voice: age is fixed)
+    lp: f32,
+    lp_a: f32,
+    /// analog decimation: hold value, counter, factor
+    hold: f32,
+    hold_n: u8,
+    dec: u8,
+    /// analog hiss amount, tape drive
+    noise: f32,
+    drive: f32,
+    wow_phase: f32,
+    wow_depth: f32,
+    /// tiny xorshift for hiss
+    rng: u32,
 }
 
 struct Node {
@@ -176,18 +249,100 @@ struct Node {
     shared: Arc<GranularShared>,
     synth: Option<Box<dyn AudioGraphNode + Send>>,
     synth_buf: AudioBuffer,
-    delay: Vec<f32>,
-    /// absolute frames written to the delay line
-    write: u64,
-    /// absolute mic-ring frame we read next
-    mic_read: Option<u64>,
-    grains: [Grain; MAX_GRAINS],
-    samples_to_step: u32,
-    step: usize,
+    /// CELLS x GRAIN_MAX sample storage
+    grains: Vec<f32>,
+    cells: [Cell; CELLS],
+    grid: Life,
+    /// what we last wrote to `settings.steps`
+    published: [u32; W],
+    parents: [[u8; H]; W],
+    voices: [Voice; MAX_VOICES],
+    samples_to_slot: u32,
+    slot: usize,
     was_running: bool,
+    mic_read: Option<u64>,
+    mic_hist: Vec<f32>,
+    /// absolute frames written to mic_hist
+    mic_write: u64,
+    /// smoothed input RMS
+    input_level: f32,
     seed: u32,
-    fb_l: f32,
-    fb_r: f32,
+    rec: Option<Recorder>,
+    /// dev: MANGUO_LOG_GRAINS prints births/deaths/generations (not realtime-safe)
+    debug: bool,
+}
+
+/// Dev/QA: records input (mono), repeats (stereo) and output (stereo) stems
+/// into memory and writes them as 32-bit float WAVs when asked to stop.
+struct Recorder {
+    dir: String,
+    input: Vec<f32>,
+    grains: Vec<f32>,
+    output: Vec<f32>,
+    max_frames: usize,
+    done: bool,
+    markers: Vec<(u32, usize)>,
+    last_marker: u32,
+}
+
+impl Recorder {
+    fn new(dir: String, secs: usize) -> Self {
+        let max_frames = secs * SR as usize;
+        Self {
+            dir,
+            input: Vec::with_capacity(max_frames),
+            grains: Vec::with_capacity(max_frames * 2),
+            output: Vec::with_capacity(max_frames * 2),
+            max_frames,
+            done: false,
+            markers: Vec::with_capacity(64),
+            last_marker: 0,
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.input.len() >= self.max_frames
+    }
+
+    fn write(&mut self) {
+        if self.done {
+            return;
+        }
+        self.done = true;
+        let _ = std::fs::create_dir_all(&self.dir);
+        write_wav(&format!("{}/input.wav", self.dir), &self.input, 1);
+        write_wav(&format!("{}/grains.wav", self.dir), &self.grains, 2);
+        write_wav(&format!("{}/output.wav", self.dir), &self.output, 2);
+        let text: String = self.markers.iter().map(|(m, f)| format!("{} {}\n", m, f)).collect();
+        let _ = std::fs::write(format!("{}/markers.txt", self.dir), text);
+    }
+}
+
+fn write_wav(path: &str, data: &[f32], channels: u16) {
+    let mut out = Vec::with_capacity(44 + data.len() * 4);
+    let data_bytes = (data.len() * 4) as u32;
+    let sr = SR as u32;
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_bytes).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&sr.to_le_bytes());
+    out.extend_from_slice(&(sr * channels as u32 * 4).to_le_bytes());
+    out.extend_from_slice(&(channels * 4).to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_bytes.to_le_bytes());
+    for s in data {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    let _ = std::fs::write(path, out);
+}
+
+#[inline]
+fn cell_index(x: usize, y: usize) -> usize {
+    x * H + y
 }
 
 impl Node {
@@ -200,36 +355,311 @@ impl Node {
         (x >> 8) as f32 / (1u32 << 24) as f32
     }
 
-    fn samples_per_step(&self) -> f32 {
-        let bpm = self.settings.bpm.get().clamp(20.0, 300.0);
-        SR * 60.0 / bpm / 4.0
+    fn slot_len(&self) -> usize {
+        let time = self.settings.time.get().clamp(0.1, 2.0);
+        ((SR * time) as usize / W).max(64)
     }
 
-    fn spawn_grains(&mut self) {
-        let column = self.settings.steps[self.step].get();
+    fn grain_len(&self) -> usize {
+        let smear = self.settings.smear.get().clamp(1.0, 4.0);
+        ((self.slot_len() as f32 * smear) as usize).clamp(FADE * 2, GRAIN_MAX)
+    }
+
+    /// Mark a newborn cell: it records the input when the playhead passes its
+    /// column, then replays it one Time later.
+    fn birth_pending(&mut self, x: usize, y: usize) {
+        let ci = cell_index(x, y);
+        let phase = self.rnd();
+        self.cells[ci] = Cell { alive: true, pending: true, age: 0, gain: 1.0, len: 0, phase };
+    }
+
+    /// Record the last `grain_len` samples of input into cell (x, y): the slice
+    /// that just played during column x (plus the smear tail before it).
+    fn capture(&mut self, x: usize, y: usize) {
+        let len = self.grain_len();
+        let start = self.mic_write.saturating_sub(len as u64);
+        let ci = cell_index(x, y);
+        let base = ci * GRAIN_MAX;
+        for i in 0..len {
+            let p = start + i as u64;
+            let s = if self.mic_write - p <= MIC_HIST as u64 && p < self.mic_write {
+                self.mic_hist[(p as usize) & (MIC_HIST - 1)]
+            } else {
+                0.0
+            };
+            self.grains[base + i] = s;
+        }
+        let c = &mut self.cells[ci];
+        c.pending = false;
+        c.len = len;
+        if self.debug {
+            let e: f32 = self.grains[base..base + len].iter().map(|v| v * v).sum::<f32>() / len as f32;
+            log!("record ({},{}) len {} rms {:.4}", x, y, len, e.sqrt());
+        }
+    }
+
+    /// Slot `x` just ended: record every pending cell in that column.
+    fn record_pending(&mut self, x: usize) {
+        for y in 0..H {
+            let ci = cell_index(x, y);
+            if self.cells[ci].alive && self.cells[ci].pending {
+                self.capture(x, y);
+            }
+        }
+    }
+
+    fn inherit(&mut self, x: usize, y: usize, parent: usize) {
+        let ci = cell_index(x, y);
+        let p = self.cells[parent];
+        if p.pending || p.len == 0 {
+            self.birth_pending(x, y);
+            return;
+        }
+        let (pb, cb) = (parent * GRAIN_MAX, ci * GRAIN_MAX);
+        let len = p.len;
+        if pb < cb {
+            let (a, b) = self.grains.split_at_mut(cb);
+            b[..len].copy_from_slice(&a[pb..pb + len]);
+        } else {
+            let (a, b) = self.grains.split_at_mut(pb);
+            a[cb..cb + len].copy_from_slice(&b[..len]);
+        }
+        let repeats = self.regen_gain();
+        self.cells[ci] = Cell { alive: true, pending: false, age: p.age + 1, gain: p.gain * repeats, len, phase: p.phase };
+    }
+
+    fn kill(&mut self, x: usize, y: usize) {
+        self.cells[cell_index(x, y)] = Cell::default();
+    }
+
+    /// Repeats knob to per-generation gain. Digital never self-oscillates;
+    /// Analog and Tape pass unity around "3 o'clock".
+    fn regen_gain(&self) -> f32 {
+        let r = self.settings.repeats.get().clamp(0.0, 1.0);
+        match self.settings.mode.get() {
+            DelayMode::Digital => r * 0.98,
+            _ => {
+                if r < 0.75 {
+                    r * 1.3
+                } else {
+                    0.975 + (r - 0.75) * 0.4 // 0.975 .. 1.075
+                }
+            }
+        }
+    }
+
+    /// Apply UI edits: `steps` differing from what we published means the
+    /// user clicked / seeded / the voice stamped. Births capture input.
+    fn apply_ui_edits(&mut self) {
+        let mut wanted = [0u32; W];
+        for x in 0..W {
+            wanted[x] = self.settings.steps[x].get() & 0xFFFF;
+        }
+        if wanted == self.published {
+            return;
+        }
+        if self.debug {
+            log!("grid edit: {:?} -> {:?} (slot {}, mode {:?})", self.published, wanted, self.slot, self.settings.mode.get());
+        }
+        for x in 0..W {
+            let was = self.published[x];
+            let now = wanted[x];
+            if was == now {
+                continue;
+            }
+            for y in 0..H {
+                let bit = 1u32 << y;
+                match (was & bit != 0, now & bit != 0) {
+                    (false, true) => {
+                        self.grid.set(x, y, true);
+                        self.birth_pending(x, y);
+                    }
+                    (true, false) => {
+                        self.grid.set(x, y, false);
+                        self.kill(x, y);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.published = wanted;
+    }
+
+    fn publish(&mut self) {
+        let steps = self.grid.to_steps();
+        let mut pop = 0u32;
+        for x in 0..W {
+            self.settings.steps[x].set(steps[x]);
+            self.published[x] = steps[x];
+            pop += steps[x].count_ones();
+        }
+        self.shared.population.store(pop, Ordering::Relaxed);
+        SignalToUI::set_ui_signal();
+    }
+
+    /// One delay generation.
+    fn generation(&mut self) {
+        let repeats = self.regen_gain();
+        if self.settings.life.get() {
+            let next = self.grid.step_with_parents(&mut self.parents);
+            // pass 1: births inherit from parents that are all still intact
+            for x in 0..W {
+                for y in 0..H {
+                    if !self.grid.get(x, y) && next.get(x, y) {
+                        let p = self.parents[x][y];
+                        if p != u8::MAX && self.cells[p as usize].alive {
+                            self.inherit(x, y, p as usize);
+                        } else {
+                            self.birth_pending(x, y);
+                        }
+                    }
+                }
+            }
+            // pass 2: survivors age, the dead drop their grain
+            for x in 0..W {
+                for y in 0..H {
+                    match (self.grid.get(x, y), next.get(x, y)) {
+                        (true, true) => {
+                            let c = &mut self.cells[cell_index(x, y)];
+                            if !c.pending {
+                                c.age += 1;
+                                c.gain *= repeats;
+                            }
+                        }
+                        (true, false) => self.kill(x, y),
+                        _ => {}
+                    }
+                }
+            }
+            self.grid = next;
+        } else {
+            for x in 0..W {
+                for y in 0..H {
+                    if self.grid.get(x, y) {
+                        let c = &mut self.cells[cell_index(x, y)];
+                        if !c.pending {
+                            c.age += 1;
+                            c.gain *= repeats;
+                        }
+                    }
+                }
+            }
+        }
+        // repeats that have decayed away die (Digital and low Repeats)
+        for x in 0..W {
+            for y in 0..H {
+                let ci = cell_index(x, y);
+                if self.grid.get(x, y) && self.cells[ci].gain < 0.002 {
+                    self.grid.set(x, y, false);
+                    self.kill(x, y);
+                }
+            }
+        }
+        self.shared.generation.fetch_add(1, Ordering::Relaxed);
+        self.publish();
+        if self.debug {
+            let pending = self.cells.iter().filter(|c| c.alive && c.pending).count();
+            log!("generation {} pop {} pending {} grid {:?}", self.shared.generation.load(Ordering::Relaxed), self.shared.population.load(Ordering::Relaxed), pending, self.grid.cells);
+        }
+    }
+
+    /// Start of slot `x`: every live cell in the column replays its grain.
+    fn trigger_slot(&mut self, x: usize) {
+        let scale = self.settings.scale.get();
+        let mode = self.settings.mode.get() as u8;
+        let column = self.grid.cells[x];
         if column == 0 {
             return;
         }
-        let sps = self.samples_per_step() as f64;
-        let scale = self.settings.scale.get();
-        let len = (SR * (0.03 + 0.57 * self.settings.grain_len.get().clamp(0.0, 1.0))) as u32;
-        let spray = self.settings.spray.get().clamp(0.0, 1.0) as f64 * 2.0 * sps;
-        let back = self.settings.delay_steps.get().clamp(1.0, 16.0) as f64 * sps;
-        for row in 0..GRID_H {
-            if column & (1 << row) == 0 {
+        for y in 0..H {
+            if column & (1 << y) == 0 {
                 continue;
             }
-            // row 0 = top = highest degree
-            let degree = 8 - row as i32;
+            let ci = cell_index(x, y);
+            let c = self.cells[ci];
+            if !c.alive || c.pending || c.len == 0 {
+                continue;
+            }
+            let degree = 8 - y as i32;
             let semis = scale.semitones(degree);
             let rate = 2f64.powf(semis as f64 / 12.0);
-            let jitter = (self.rnd() as f64 * 2.0 - 1.0) * spray;
-            let start = (self.write as f64 - back - jitter - len as f64 * rate).max(0.0);
-            let pan = (row as f32 / (GRID_H - 1) as f32) * 1.4 - 0.7; // -0.7..0.7
+            let pan = (y as f32 / (H - 1) as f32) * 1.2 - 0.6;
             let gl = ((1.0 - pan) * 0.5).sqrt();
             let gr = ((1.0 + pan) * 0.5).sqrt();
-            if let Some(g) = self.grains.iter_mut().find(|g| !g.active) {
-                *g = Grain { active: true, pos: start, rate, len, age: 0, gain_l: gl, gain_r: gr };
+            let level = self.input_level;
+            let age = c.age as f32;
+            // Silos-style per-generation character
+            let (cutoff, dec, noise, drive, wow_depth) = match mode {
+                // Digital: clean, darkens each generation
+                0 => ((8000.0 * 0.7f32.powf(age)).max(400.0), 1u8, 0.0, 1.0, 0.0),
+                // Analog: darker, loses fidelity (sample-hold + hiss)
+                1 => ((4500.0 * 0.85f32.powf(age)).max(400.0), (1 + (c.age as u8) / 2).min(8), 0.004 * age.min(6.0), 1.0, 0.0),
+                // Tape: dark, saturates harder every cycle (more with a hot input), wow grows
+                _ => (
+                    (3500.0 * 0.92f32.powf(age)).max(500.0),
+                    1,
+                    0.0,
+                    1.0 + (1.0 + 8.0 * level.min(0.5)) * age.min(10.0),
+                    0.003 * (1.0 + age * 0.3).min(3.0),
+                ),
+            };
+            let lp_a = (1.0 - (-std::f32::consts::TAU * cutoff / SR).exp()).min(1.0);
+            let rng = self.seed ^ (ci as u32 * 2654435761);
+            if self.debug {
+                log!("trigger ({},{}) age {} gain {:.3} mode {} cutoff {:.0} lp_a {:.4} dec {} drive {:.2}", x, y, c.age, c.gain, mode, cutoff, lp_a, dec, drive);
+            }
+            if let Some(v) = self.voices.iter_mut().find(|v| !v.active) {
+                *v = Voice {
+                    active: true,
+                    cell: ci,
+                    pos: 0.0,
+                    rate,
+                    len: c.len,
+                    gain: c.gain.min(1.5),
+                    gain_l: gl,
+                    gain_r: gr,
+                    mode,
+                    lp: 0.0,
+                    lp_a,
+                    hold: 0.0,
+                    hold_n: 0,
+                    dec,
+                    noise,
+                    drive,
+                    wow_phase: c.phase,
+                    wow_depth,
+                    rng: rng | 1,
+                };
+            }
+        }
+    }
+
+    /// Multi-generational degradation of one sample (coefficients fixed per voice).
+    #[inline]
+    fn degrade(v: &mut Voice, s: f32) -> f32 {
+        match v.mode {
+            0 => {
+                v.lp += (s - v.lp) * v.lp_a;
+                v.lp
+            }
+            1 => {
+                if v.hold_n == 0 {
+                    v.hold = s;
+                }
+                v.hold_n = (v.hold_n + 1) % v.dec.max(1);
+                // xorshift hiss
+                v.rng ^= v.rng << 13;
+                v.rng ^= v.rng >> 17;
+                v.rng ^= v.rng << 5;
+                let n = (v.rng >> 8) as f32 / (1u32 << 24) as f32 - 0.5;
+                // hiss rides on the signal, never on silence
+                let x = v.hold + n * v.noise * (v.hold.abs() * 20.0).min(1.0);
+                v.lp += (x - v.lp) * v.lp_a;
+                (v.lp * 1.2).tanh()
+            }
+            _ => {
+                v.lp += (s - v.lp) * v.lp_a;
+                (v.lp * v.drive).tanh() / v.drive.sqrt()
             }
         }
     }
@@ -255,6 +685,7 @@ impl AudioGraphNode for Node {
         inputs: &[&AudioBuffer],
         display: &mut DisplayAudioGraph,
     ) {
+        let render_start = std::time::Instant::now();
         let output = &mut outputs[0];
         let frames = output.frame_count();
         let channels = output.channel_count();
@@ -266,93 +697,118 @@ impl AudioGraphNode for Node {
             s.render_to_audio_buffer(info, &mut [&mut self.synth_buf], inputs, display);
         }
 
-        // 2. mic position bookkeeping (keep ~2 buffers of latency)
+        // 2. pull the mic into our history (keep ~4 buffers of latency so the
+        // input callback's jitter never starves us)
         let wp = MIC_RING.write_pos();
         let mut rp = match self.mic_read {
             Some(rp) if rp <= wp && wp - rp < (crate::mic_ring::MIC_RING_LEN as u64) / 2 => rp,
-            _ => wp.saturating_sub(2 * frames as u64),
+            _ => wp.saturating_sub(4 * frames as u64),
         };
+        let mut mic = [0.0f32; 4096];
+        let mut sum = 0.0f32;
+        let mut underruns = 0u32;
+        for i in 0..frames.min(4096) {
+            let m = MIC_RING.get(rp, wp);
+            if rp < wp {
+                rp += 1;
+            } else if wp > 0 {
+                // (before the input device delivers anything there is nothing to starve)
+                underruns += 1;
+            }
+            mic[i] = m;
+            sum += m * m;
+            self.mic_hist[(self.mic_write as usize) & (MIC_HIST - 1)] = m;
+            self.mic_write += 1;
+        }
+        self.mic_read = Some(rp);
+        if underruns > 0 {
+            self.shared.mic_underruns.fetch_add(underruns, Ordering::Relaxed);
+        }
+        let rms = (sum / frames.max(1) as f32).sqrt();
+        self.input_level += (rms - self.input_level) * 0.2;
 
-        // 3. sequencer clock state
+        // 3. UI edits to the grid
+        self.apply_ui_edits();
+
+        // 4. clock
         let running = self.settings.running.get();
         if running && !self.was_running {
-            self.step = GRID_W - 1;
-            self.samples_to_step = 0;
+            self.slot = W - 1;
+            self.samples_to_slot = 0;
         }
         self.was_running = running;
 
         let wet = self.settings.wet.get();
         let dry = self.settings.voice_gain.get();
         let sg = self.settings.synth_gain.get();
-        let fb = self.settings.feedback.get().clamp(0.0, 0.95);
+        let dt = 1.0 / SR;
 
-        // grains also go to the oscilloscope, as display voice 16
         let mut disp = display.pop_buffer_resize(frames, channels);
         if let Some(d) = &mut disp {
             d.zero();
         }
+        if let Some(rec) = &mut self.rec {
+            let m = self.shared.marker.load(Ordering::Relaxed);
+            if m != rec.last_marker {
+                rec.last_marker = m;
+                rec.markers.push((m, rec.input.len()));
+            }
+        }
 
         let mut peak = 0.0f32;
         for i in 0..frames {
-            // step clock
             if running {
-                if self.samples_to_step == 0 {
-                    self.step = (self.step + 1) % GRID_W;
-                    self.samples_to_step = self.samples_per_step().max(1.0) as u32;
-                    self.spawn_grains();
-                    self.shared.current_step.store(self.step as u32, Ordering::Relaxed);
-                    SignalToUI::set_ui_signal();
+                if self.samples_to_slot == 0 {
+                    self.record_pending(self.slot);
+                    self.slot = (self.slot + 1) % W;
+                    if self.slot == 0 {
+                        self.generation();
+                    }
+                    self.samples_to_slot = self.slot_len() as u32;
+                    self.trigger_slot(self.slot);
+                    self.shared.current_slot.store(self.slot as u32, Ordering::Relaxed);
                 }
-                self.samples_to_step -= 1;
+                self.samples_to_slot -= 1;
             }
 
-            // grains
+            // voices
             let mut gl = 0.0f32;
             let mut gr = 0.0f32;
-            for g in self.grains.iter_mut() {
-                if !g.active {
+            for v in self.voices.iter_mut() {
+                if !v.active {
                     continue;
                 }
-                let s = {
-                    // inline of delay_read (borrow rules)
-                    let pos = g.pos;
-                    if pos < 0.0 || self.write as f64 - pos > (DELAY_LEN - 2) as f64 || pos >= self.write as f64 {
-                        0.0
-                    } else {
-                        let fl = pos.floor();
-                        let f = (pos - fl) as f32;
-                        let i0 = (fl as usize) & (DELAY_LEN - 1);
-                        let i1 = (i0 + 1) & (DELAY_LEN - 1);
-                        self.delay[i0] * (1.0 - f) + self.delay[i1] * f
-                    }
-                };
-                // Hann window
-                let t = g.age as f32 / g.len.max(1) as f32;
-                let w = 0.5 - 0.5 * (t * std::f32::consts::TAU).cos();
-                gl += s * w * g.gain_l;
-                gr += s * w * g.gain_r;
-                g.pos += g.rate;
-                g.age += 1;
-                if g.age >= g.len {
-                    g.active = false;
+                let base = v.cell * GRAIN_MAX;
+                let ip = v.pos.floor();
+                let f = (v.pos - ip) as f32;
+                let i0 = ip as usize;
+                if i0 + 1 >= v.len {
+                    v.active = false;
+                    continue;
                 }
+                let s = self.grains[base + i0] * (1.0 - f) + self.grains[base + i0 + 1] * f;
+                // 5 ms edges
+                let edge_in = (i0 as f32 / FADE as f32).min(1.0);
+                let edge_out = ((v.len - i0) as f32 / FADE as f32).min(1.0);
+                let win = edge_in * edge_out;
+                let s = Self::degrade(v, s) * win * v.gain;
+                gl += s * v.gain_l;
+                gr += s * v.gain_r;
+                // tape wow: slow pitch wobble (cheap parabolic sine)
+                let wow = if v.wow_depth > 0.0 {
+                    v.wow_phase = (v.wow_phase + dt * 0.9).fract();
+                    let ph = v.wow_phase * 2.0 - 1.0;
+                    1.0 + v.wow_depth * (ph * (1.0 - ph.abs()) * 4.0)
+                } else {
+                    1.0
+                };
+                v.pos += v.rate * wow as f64;
             }
 
-            // mic in -> delay line (+ feedback of the previous frame's grains)
-            let m = MIC_RING.get(rp, wp);
-            if rp < wp {
-                rp += 1;
-            }
-            let fbin = (self.fb_l + self.fb_r) * 0.5 * fb;
-            self.delay[(self.write as usize) & (DELAY_LEN - 1)] = (m + fbin).clamp(-1.5, 1.5);
-            self.write += 1;
-            self.fb_l = gl;
-            self.fb_r = gr;
-
-            let gl = gl * wet;
-            let gr = gr * wet;
+            let gl = (gl * wet).clamp(-1.5, 1.5);
+            let gr = (gr * wet).clamp(-1.5, 1.5);
             peak = peak.max(gl.abs()).max(gr.abs());
-
+            let m = mic[i.min(4095)];
             for c in 0..channels {
                 let synth = self.synth_buf.channel(c)[i] * sg;
                 let grain = if c == 0 { gl } else { gr };
@@ -361,10 +817,27 @@ impl AudioGraphNode for Node {
                     d.channel_mut(c)[i] = grain;
                 }
             }
+            if let Some(rec) = &mut self.rec {
+                if !rec.done && !rec.full() {
+                    rec.input.push(m);
+                    rec.grains.push(gl);
+                    rec.grains.push(gr);
+                    rec.output.push(output.channel(0)[i]);
+                    rec.output.push(output.channel(channels.min(2) - 1)[i]);
+                }
+            }
         }
-        self.mic_read = Some(rp);
-        // hold the max until the UI reads (positive f32 bits order like the floats)
         self.shared.grain_level.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        let us = render_start.elapsed().as_micros().min(u32::MAX as u128) as u32;
+        self.shared.max_render_us.fetch_max(us, Ordering::Relaxed);
+        self.shared.frames.store(frames as u32, Ordering::Relaxed);
+        // QA only: the one-time file write is deliberately outside the timing
+        if let Some(rec) = &mut self.rec {
+            if !rec.done && (rec.full() || self.shared.record_stop.load(Ordering::Relaxed) == 1) {
+                rec.write();
+                self.shared.record_stop.store(2, Ordering::Relaxed);
+            }
+        }
         if let Some(d) = disp {
             display.send_buffer(peak > 0.0005, 16, d);
         }
@@ -372,11 +845,15 @@ impl AudioGraphNode for Node {
 }
 
 impl GranularDelay {
-    pub fn current_step(&self) -> usize {
-        self.shared.current_step.load(Ordering::Relaxed) as usize
+    pub fn current_slot(&self) -> usize {
+        self.shared.current_slot.load(Ordering::Relaxed) as usize
     }
 
-    /// Peak grain level since the last call.
+    pub fn generation(&self) -> u32 {
+        self.shared.generation.load(Ordering::Relaxed)
+    }
+
+    /// Peak repeat level since the last call.
     pub fn take_grain_level(&self) -> f32 {
         f32::from_bits(self.shared.grain_level.swap(0, Ordering::Relaxed))
     }

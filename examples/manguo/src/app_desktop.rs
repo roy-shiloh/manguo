@@ -976,16 +976,14 @@ live_design! {
             width: Fit
             checkbox = { text: "Life", width: Fit, padding: {right: (SSPACING_2)} }
         }
-        liferate = <InstrumentSlider> {
+        repeats = <InstrumentSlider> {
             width: Fill
             slider = {
                 draw_bg: {line_color: (COLOR_HOT)}
-                min: 1.0
-                max: 16.0
-                step: 1.0
-                precision: 0
-                default: 4.0
-                text: "Steps/Gen"
+                min: 0.0
+                max: 1.0
+                default: 0.6
+                text: "Repeats"
             }
         }
         lifeseed = <PxButton> { icon = { source: (PX_SEED) } }
@@ -1006,6 +1004,15 @@ live_design! {
             spacing: (SSPACING_1),
             padding: {bottom: (SSPACING_0), top: (SSPACING_0)}
             align: {x: 0.0, y: 0.5}
+
+            delaymode = <InstrumentDropdown> {
+                height: Fit,
+                width: Fit
+                dropdown = {
+                    labels: ["Digital", "Analog", "Tape"]
+                    values: [Digital, Analog, Tape]
+                }
+            }
 
             scaletype = <InstrumentDropdown> {
                 height: Fit,
@@ -1125,30 +1132,15 @@ live_design! {
         slider = { draw_bg: {line_color: (COLOR_HOT)} min: 0.0 max: 1.0 }
     }
 
-    // Granular delay parameters + the output mix
+    // Grain shape
     GrainControls = <View> {
         height: Fit,
         width: Fill,
         margin: {left: (SSPACING_1), right: (SSPACING_1), bottom: (SSPACING_1)}
-        flow: Down,
+        flow: Right,
         padding: {left: (SSPACING_2), right: (SSPACING_2), bottom: (SSPACING_1)}
-        spacing: (SSPACING_0)
-
-        <SubheaderContainer> {
-            margin: {top: (SSPACING_0), bottom: (SSPACING_0)}
-            <FishSubTitle> { label = { text: "Grains", draw_text: {color: (COLOR_HOT)} } }
-        }
-        <View> {
-            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
-            graindelay = <GrainSlider> { slider = { min: 1.0 max: 16.0 step: 1.0 precision: 0 default: 4.0 text: "Delay (steps)" } }
-            grainlen = <GrainSlider> { slider = { default: 0.45 text: "Length" } }
-        }
-        <View> {
-            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
-            grainspray = <GrainSlider> { slider = { default: 0.2 text: "Spray" } }
-            grainfeedback = <GrainSlider> { slider = { max: 0.95 default: 0.3 text: "Feedback" } }
-        }
-
+        spacing: (SSPACING_1)
+        smear = <GrainSlider> { slider = { min: 1.0 max: 4.0 default: 2.0 precision: 1 text: "Smear (slots)" } }
     }
 
     SequencerPanel = <SquareView> {
@@ -1167,7 +1159,7 @@ live_design! {
                 title = {
                     width: Fill
                     label = {
-                        text: "Grain Sequencer",
+                        text: "Grain Delay",
                     },
                     draw_bg: {color: (COLOR_DEFAULT)}
                 }
@@ -1219,13 +1211,15 @@ live_design! {
                         }
                     }
 
-                    speed = <InstrumentSlider> {
+                    delaytime = <InstrumentSlider> {
                         width: Fill
                         slider = {
                             draw_bg: {line_color: (COLOR_DEFAULT)}
-                            min: 20.0
-                            max: 240.0
-                            text: "BPM"
+                            min: 0.1
+                            max: 2.0
+                            default: 0.5
+                            precision: 2
+                            text: "Time (s)"
                         }
                     }
                 }
