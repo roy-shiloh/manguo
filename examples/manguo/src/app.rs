@@ -10,8 +10,8 @@ use crate::{
 live_design! {
     use link::widgets::*
     use link::theme::*
-    use makepad_example_ironfish::app_desktop::AppDesktop
-    use makepad_example_ironfish::app_desktop::LifeWindow
+    use manguo::app_desktop::AppDesktop
+    use manguo::app_desktop::LifeWindow
 
     use makepad_audio_graph::mixer::Mixer;
     use makepad_audio_graph::instrument::Instrument;
@@ -28,13 +28,13 @@ live_design! {
         }
         ui: <Root>{
             main_window = <Window> {
-                window: {inner_size: vec2(1280, 1060), title: "IRONFISH 芒果"},
+                window: {inner_size: vec2(1280, 1060), title: "MANGUO 芒果"},
                 pass: {clear_color: #x1A0A14}
                 block_signal_event: true;
                 body = <AppDesktop> {}
             }
             life_window = <Window> {
-                window: {inner_size: vec2(720, 800), title: "IRONFISH LIFE", open_on_start: false},
+                window: {inner_size: vec2(720, 800), title: "MANGUO LIFE", open_on_start: false},
                 pass: {clear_color: #x1A0A14}
                 block_signal_event: true;
                 body = <LifeWindow> {}
@@ -106,7 +106,7 @@ pub struct LifeControl {
     pub timer: Timer,
     pub seed: u32,
     pub generation: u64,
-    /// dev: one-shot timer that closes the life window (IRONFISH_CLOSE_LIFE_AFTER)
+    /// dev: one-shot timer that closes the life window (MANGUO_CLOSE_LIFE_AFTER)
     pub test_close_timer: Timer,
 }
 
@@ -322,16 +322,16 @@ impl MatchEvent for App {
         self.midi_input = cx.midi_input();
         self.ui.slider_set(ids!(liferate.slider)).set_value(cx, self.life.steps_per_gen as f64);
         self.start_voice_input(cx);
-        // Dev/verification: IRONFISH_OPEN_LIFE=grid|fractal opens the life window running.
-        if std::env::var("IRONFISH_VOICE_TEST").is_ok() {
+        // Dev/verification: MANGUO_OPEN_LIFE=grid|fractal opens the life window running.
+        if std::env::var("MANGUO_VOICE_TEST").is_ok() {
             self.set_voice_enabled(cx, true);
         }
-        if let Ok(mode) = std::env::var("IRONFISH_OPEN_LIFE") {
+        if let Ok(mode) = std::env::var("MANGUO_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
             self.set_life_enabled(cx, true);
             self.set_life_mode(cx, mode == "fractal");
         }
-        if let Some(secs) = std::env::var("IRONFISH_CLOSE_LIFE_AFTER").ok().and_then(|v| v.parse::<f64>().ok()) {
+        if let Some(secs) = std::env::var("MANGUO_CLOSE_LIFE_AFTER").ok().and_then(|v| v.parse::<f64>().ok()) {
             self.life.test_close_timer = cx.start_timeout(secs);
         }
     }
@@ -468,10 +468,10 @@ impl App {
         let mut ring = [0.0f32; N];
         let mut write = 0usize;
         let mut scratch = [0.0f32; N];
-        // Dev/verification: IRONFISH_VOICE_TEST=<hz>[:<seconds>] replaces the
+        // Dev/verification: MANGUO_VOICE_TEST=<hz>[:<seconds>] replaces the
         // mic with a synthetic "sung" tone (optionally stopping after N seconds)
         // so the whole chain can be exercised headless.
-        let (test_hz, test_secs): (Option<f32>, f32) = match std::env::var("IRONFISH_VOICE_TEST") {
+        let (test_hz, test_secs): (Option<f32>, f32) = match std::env::var("MANGUO_VOICE_TEST") {
             Ok(v) => {
                 let mut it = v.split(':');
                 (it.next().and_then(|h| h.parse().ok()), it.next().and_then(|s| s.parse().ok()).unwrap_or(f32::INFINITY))
@@ -648,7 +648,7 @@ impl App{
         
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
         
-        let file_name = format!("examples/ironfish/preset_{}.txt", index);
+        let file_name = format!("{}/preset_{}.txt", env!("CARGO_MANIFEST_DIR"), index);
         if save {
             let nodes = ironfish.settings.live_read();
             let data = nodes.to_cbor(0).unwrap();
@@ -788,7 +788,7 @@ impl AppMain for App {
             }
             if self.life.test_close_timer.is_timer(te).is_some() {
                 cx.stop_timer(self.life.test_close_timer);
-                log!("IRONFISH_CLOSE_LIFE_AFTER: closing life window");
+                log!("MANGUO_CLOSE_LIFE_AFTER: closing life window");
                 self.ui.window(id!(life_window)).close(cx);
             }
         }

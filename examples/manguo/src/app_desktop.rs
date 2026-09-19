@@ -5,8 +5,8 @@ live_design! {
     use link::theme::*
     use link::shaders::*
 
-    use makepad_example_ironfish::sequencer::Sequencer;
-    use makepad_example_ironfish::life_fractal::LifeFractal;
+    use manguo::sequencer::Sequencer;
+    use manguo::life_fractal::LifeFractal;
     use makepad_audio_widgets::display_audio::DisplayAudio;
     use makepad_audio_widgets::piano::Piano;
 
