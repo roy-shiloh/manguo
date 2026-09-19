@@ -11,4 +11,6 @@ pub mod app;
 mod sequencer;
 mod life;
 mod life_fractal;
+mod mic_ring;
+pub mod granular;
 mod app_desktop;

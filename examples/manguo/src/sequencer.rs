@@ -311,6 +311,16 @@ impl Widget for Sequencer {
 }
 
 impl SequencerRef {
+    /// Moves the playhead highlight.
+    pub fn set_step(&self, cx: &mut Cx, step: usize) {
+        if let Some(mut inner) = self.borrow_mut() {
+            if inner.current_step != step {
+                inner.current_step = step;
+                inner.redraw(cx);
+            }
+        }
+    }
+
     /// Writes the grid without emitting a Change action (the caller owns the model).
     pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
         if let Some(mut inner) = self.borrow_mut() {
@@ -357,6 +367,12 @@ impl SequencerRef {
 }
 
 impl SequencerSet {
+    pub fn set_step(&self, cx: &mut Cx, step: usize) {
+        for item in self.iter() {
+            item.set_step(cx, step);
+        }
+    }
+
     pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
         for item in self.iter() {
             item.set_steps(cx, steps);

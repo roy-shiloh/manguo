@@ -2,7 +2,7 @@ use crate::makepad_platform::live_atomic::AtomicGetSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use crate::{
-    life::*, life_fractal::*, makepad_audio_graph::*, makepad_audio_widgets::display_audio::*,
+    granular::*, life::*, life_fractal::*, makepad_audio_graph::*, mic_ring::MIC_RING, makepad_audio_widgets::display_audio::*,
     makepad_audio_widgets::piano::*, makepad_synth_ironfish::ironfish::*, makepad_widgets::*,
     sequencer::*,
 };
@@ -13,15 +13,15 @@ live_design! {
     use manguo::app_desktop::AppDesktop
     use manguo::app_desktop::LifeWindow
 
-    use makepad_audio_graph::mixer::Mixer;
     use makepad_audio_graph::instrument::Instrument;
     use makepad_synth_ironfish::ironfish::IronFish;
+    use manguo::granular::GranularDelay;
 
     App = {{App}} {
 
         audio_graph: {
-            root: <Mixer> {
-                c1 = <Instrument> {
+            root: <GranularDelay> {
+                synth = <Instrument> {
                     <IronFish> {}
                 }
             }
@@ -108,6 +108,11 @@ pub struct LifeControl {
     pub generation: u64,
     /// dev: one-shot timer that closes the life window (MANGUO_CLOSE_LIFE_AFTER)
     pub test_close_timer: Timer,
+    /// last playhead column shown
+    pub last_step: usize,
+    /// dev: MANGUO_LOG_GRAINS logs grain peaks once a second
+    pub log_grains: bool,
+    pub last_grain_log: f64,
 }
 
 #[derive(Live)]
@@ -129,6 +134,7 @@ impl LiveRegister for App {
         crate::makepad_audio_widgets::live_design(cx);
         crate::makepad_audio_graph::live_design(cx);
         crate::makepad_synth_ironfish::live_design(cx);
+        crate::granular::live_design(cx);
         crate::sequencer::live_design(cx);
         crate::life_fractal::live_design(cx);
         crate::app_desktop::live_design(cx);
@@ -149,14 +155,28 @@ impl App {
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
         let db = DataBindingStore::from_nodes(ironfish.settings.live_read());
         Self::data_bind(db.data_to_widgets(cx, &ui));
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        let db = DataBindingStore::from_nodes(granular.settings.live_read());
+        Self::granular_bind(db.data_to_widgets(cx, &ui));
     }
     
+    /// Bindings for the grain sequencer (GranularSettings).
+    pub fn granular_bind(mut db: DataBindingMap) {
+        db.bind(id!(steps), ids!(sequencer));
+        db.bind(id!(running), ids!(playpause));
+        db.bind(id!(bpm), ids!(speed.slider));
+        db.bind(id!(scale), ids!(scaletype.dropdown));
+        db.bind(id!(delay_steps), ids!(graindelay.slider));
+        db.bind(id!(grain_len), ids!(grainlen.slider));
+        db.bind(id!(spray), ids!(grainspray.slider));
+        db.bind(id!(feedback), ids!(grainfeedback.slider));
+        db.bind(id!(wet), ids!(grainwet.slider));
+        db.bind(id!(voice_gain), ids!(mixvoice.slider));
+        db.bind(id!(synth_gain), ids!(mixsynth.slider));
+    }
+
+    /// Bindings for the synth (IronFishSettings).
     pub fn data_bind(mut db: DataBindingMap) {
-        // sequencer
-        db.bind(id!(sequencer.playing), ids!(playpause));
-        db.bind(id!(sequencer.bpm), ids!(speed.slider));
-        db.bind(id!(sequencer.rootnote), ids!(rootnote.dropdown));
-        db.bind(id!(sequencer.scale), ids!(scaletype.dropdown));
         db.bind(id!(arp.enabled), ids!(arp.checkbox));
         db.bind(id!(arp.octaves), ids!(arpoctaves.slider));
 
@@ -239,9 +259,6 @@ impl App {
         db.bind(id!(osc2.harmonic), ids!(osc2.harmonicshift.slider));
         db.bind(id!(osc2.harmonicenv), ids!(osc2.harmonicenv.slider));
         db.bind(id!(osc2.harmoniclfo), ids!(osc2.harmoniclfo.slider));
-
-        // sequencer
-        db.bind(id!(sequencer.steps), ids!(sequencer));
 
         db.apply(id!(osc1.osc_type), ids!(osc1.supersaw, visible), |v| {
             v.enum_eq(id!(SuperSaw))
@@ -326,6 +343,7 @@ impl MatchEvent for App {
         if std::env::var("MANGUO_VOICE_TEST").is_ok() {
             self.set_voice_enabled(cx, true);
         }
+        self.life.log_grains = std::env::var("MANGUO_LOG_GRAINS").is_ok();
         if let Ok(mode) = std::env::var("MANGUO_OPEN_LIFE") {
             self.ui.window(id!(life_window)).open(cx);
             self.set_life_enabled(cx, true);
@@ -427,9 +445,13 @@ impl MatchEvent for App {
 
         let mut db = DataBindingStore::new();
         db.data_bind(cx, actions, &ui, Self::data_bind);
-
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
         ironfish.settings.apply_over(cx, &db.nodes);
+
+        let mut gdb = DataBindingStore::new();
+        gdb.data_bind(cx, actions, &ui, Self::granular_bind);
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        granular.settings.apply_over(cx, &gdb.nodes);
 
         // bpm changed while Life runs: retime the generation clock
         if self.life.enabled && ui.slider_set(ids!(speed.slider)).slided(&actions).is_some() {
@@ -455,6 +477,21 @@ impl MatchEvent for App {
             }
         }
         self.voice_update(cx);
+        // grain sequencer playhead
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        if self.life.log_grains {
+            let lvl = f32::from_bits(granular.shared.grain_level.load(Ordering::Relaxed));
+            let now = cx.seconds_since_app_start();
+            if lvl > 0.001 && now - self.life.last_grain_log > 1.0 {
+                self.life.last_grain_log = now;
+                log!("grains: step {} peak {:.3}", granular.current_step(), lvl);
+            }
+        }
+        let step = granular.current_step();
+        if step != self.life.last_step {
+            self.life.last_step = step;
+            self.ui.sequencer_set(ids!(sequencer)).set_step(cx, step);
+        }
     }
 }
 
@@ -480,6 +517,7 @@ impl App {
         };
         let mut phase = 0.0f32;
         let mut test_frames = 0u64;
+        let mut chunk = [0.0f32; 4096];
         cx.audio_input(0, move |_info, input| {
             let frames = input.frame_count();
             if frames == 0 || input.channel_count() == 0 {
@@ -487,6 +525,7 @@ impl App {
             }
             let ch = input.channel(0);
             let mut sum = 0.0f32;
+            let mut n = 0usize;
             for i in 0..frames {
                 let mut s = ch[i];
                 if let Some(hz) = test_hz {
@@ -499,7 +538,17 @@ impl App {
                 sum += s * s;
                 ring[write] = s;
                 write = (write + 1) % N;
+                if n < chunk.len() {
+                    chunk[n] = s;
+                    n += 1;
+                } else {
+                    MIC_RING.push(&chunk);
+                    n = 0;
+                    chunk[0] = s;
+                    n += 1;
+                }
             }
+            MIC_RING.push(&chunk[..n]);
             let rms = (sum / frames as f32).sqrt();
             shared.level.store(rms.to_bits(), Ordering::Relaxed);
 
@@ -683,17 +732,17 @@ impl App{
 // Game of Life
 impl App {
     fn life_grid(&mut self) -> Life {
-        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
-        let steps: Vec<u32> = (0..16).map(|i| ironfish.settings.sequencer.get_step(i)).collect();
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        let steps: Vec<u32> = (0..16).map(|i| granular.settings.steps[i].get()).collect();
         Life::from_steps(&steps)
     }
 
-    /// Writes a grid to the synth model and every on-screen sequencer.
+    /// Writes a grid to the grain sequencer model and every on-screen sequencer.
     fn write_life_grid(&mut self, cx: &mut Cx, life: &Life) {
         let steps = life.to_steps();
-        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
         for (i, s) in steps.iter().enumerate() {
-            ironfish.settings.sequencer.set_step(i, *s);
+            granular.settings.steps[i].set(*s);
         }
         self.ui.sequencer_set(ids!(sequencer)).set_steps(cx, &steps);
         self.ui.life_fractal(id!(fractal)).set_grid(cx, life);
@@ -701,8 +750,8 @@ impl App {
     }
 
     fn life_interval(&mut self) -> f64 {
-        let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
-        let bpm = ironfish.settings.sequencer.bpm.get().max(20.0) as f64;
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        let bpm = granular.settings.bpm.get().max(20.0) as f64;
         // one sequencer step is a 16th note
         60.0 / bpm / 4.0 * self.life.steps_per_gen.max(1) as f64
     }
@@ -720,8 +769,8 @@ impl App {
                 self.life_seed(cx);
             }
             // make the cells audible
-            let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
-            ironfish.settings.sequencer.playing.set(true);
+            let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+            granular.settings.running.set(true);
             self.ui.check_box_set(ids!(playpause)).set_active(cx, true);
             self.restart_life_timer(cx);
         } else {

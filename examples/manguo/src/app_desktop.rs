@@ -1021,9 +1021,9 @@ live_design! {
     SequencerControls = <View> {
         height: Fit,
         width: Fill,
-        margin: <SPACING_1> {}
+        margin: {left: (SSPACING_1), right: (SSPACING_1)}
         flow: Down,
-        padding: <SPACING_2> {}
+        padding: {left: (SSPACING_2), right: (SSPACING_2)}
 
         <View> {
             height: Fit,
@@ -1032,15 +1032,6 @@ live_design! {
             spacing: (SSPACING_1),
             padding: {bottom: (SSPACING_0), top: (SSPACING_0)}
             align: {x: 0.0, y: 0.5}
-
-            rootnote = <InstrumentDropdown> {
-                height: Fit,
-                width: Fit
-                dropdown = {
-                    labels: ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
-                    values: [A, Asharp, B, C, Csharp, D, Dsharp, E, F, Fsharp, G, Gsharp]
-                }
-            }
 
             scaletype = <InstrumentDropdown> {
                 height: Fit,
@@ -1153,6 +1144,39 @@ live_design! {
         }
     }
 
+    GrainSlider = <InstrumentSlider> {
+        width: Fill
+        margin: <SPACING_0> {}
+        padding: <SPACING_0> {}
+        slider = { draw_bg: {line_color: (COLOR_HOT)} min: 0.0 max: 1.0 }
+    }
+
+    // Granular delay parameters + the output mix
+    GrainControls = <View> {
+        height: Fit,
+        width: Fill,
+        margin: {left: (SSPACING_1), right: (SSPACING_1), bottom: (SSPACING_1)}
+        flow: Down,
+        padding: {left: (SSPACING_2), right: (SSPACING_2), bottom: (SSPACING_1)}
+        spacing: (SSPACING_0)
+
+        <SubheaderContainer> {
+            margin: {top: (SSPACING_0), bottom: (SSPACING_0)}
+            <FishSubTitle> { label = { text: "Grains", draw_text: {color: (COLOR_HOT)} } }
+        }
+        <View> {
+            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
+            graindelay = <GrainSlider> { slider = { min: 1.0 max: 16.0 step: 1.0 precision: 0 default: 4.0 text: "Delay (steps)" } }
+            grainlen = <GrainSlider> { slider = { default: 0.45 text: "Length" } }
+        }
+        <View> {
+            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
+            grainspray = <GrainSlider> { slider = { default: 0.2 text: "Spray" } }
+            grainfeedback = <GrainSlider> { slider = { max: 0.95 default: 0.3 text: "Feedback" } }
+        }
+
+    }
+
     SequencerPanel = <SquareView> {
         flow: Down
         margin: <SPACING_0> {}
@@ -1169,7 +1193,7 @@ live_design! {
                 title = {
                     width: Fill
                     label = {
-                        text: "Sequencer",
+                        text: "Grain Sequencer",
                     },
                     draw_bg: {color: (COLOR_DEFAULT)}
                 }
@@ -1225,24 +1249,23 @@ live_design! {
                         width: Fill
                         slider = {
                             draw_bg: {line_color: (COLOR_DEFAULT)}
-                            min: 0.0
+                            min: 20.0
                             max: 240.0
                             text: "BPM"
                         }
                     }
                 }
 
-                <Divider> {margin: {top: (SSPACING_2), right: (SSPACING_0), bottom: (SSPACING_0)}}
-
-                sequencer = <Sequencer> {width: Fill, height: 272, margin: {top: (SSPACING_2)}}
-
-                <Divider> {margin: {top: (SSPACING_2), right: (SSPACING_0), bottom: (SSPACING_0)}}
+                sequencer = <Sequencer> {width: Fill, height: 192, margin: {top: (SSPACING_1)}}
 
                 <SequencerControls> {}
+
+                <GrainControls> {}
 
             }
         }
     }
+
     CrushFXPanel = <View> {
         width: Fill,
         height: Fit
@@ -1923,6 +1946,31 @@ live_design! {
 
     }
 
+    // Output mix: grains / dry voice / synth
+    MixSettings = <View> {
+        flow: Down,
+        padding: <SPACING_0> {} spacing: (SSPACING_2)
+        height: Fit,
+        width: 300,
+        margin: {left: (SSPACING_2)}
+
+        <SubheaderContainer> {
+            margin: <SPACING_0> {}
+            <FishSubTitle> {
+                label = {
+                    text: "Mix",
+                    draw_text: {color: (COLOR_FX)},
+                }
+            }
+        }
+        <View> {
+            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
+            grainwet = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 0.8 text: "Grains" } }
+            mixvoice = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 0.0 text: "Dry voice" } }
+            mixsynth = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 1.0 text: "Synth" } }
+        }
+    }
+
     // Voice control: mic -> notes + parameter chaos + Life seeding.
     VoiceSettings = <View> {
         flow: Right,
@@ -2073,6 +2121,7 @@ live_design! {
             piano = <Piano> {height: Fit, width: Fill, margin: {top: (SSPACING_0), right: (SSPACING_2); bottom: (SSPACING_3), left: (SSPACING_2)}}
         }
         <PianoSettings> {}
+        <MixSettings> {}
         <VoiceSettings> {}
     }
 
@@ -2165,10 +2214,13 @@ live_design! {
                             let px = (PX);
                             let qpos = floor(self.pos * self.rect_size / px) * px;
                             let sdf = Sdf2d::viewport(qpos);
-                            let step = 0.0;
                             let half = self.rect_size.y * 0.5;
-                            for i in 0..4 {
-                                let wave = sample2d(self.wave_texture, vec2(qpos.x / self.rect_size.x, step));
+                            // rows 0..3: synth voices, row 16: the grain mix (32-row texture)
+                            for i in 0..5 {
+                                let row = float(i);
+                                let is_grain = step(3.5, row);
+                                row = mix(row, 16.0, is_grain);
+                                let wave = sample2d(self.wave_texture, vec2(qpos.x / self.rect_size.x, (row + 0.5) / 32.0));
                                 let right = (wave.y + wave.z / 256.0 - 0.5) * 3.0;
                                 let left = (wave.w + wave.x / 256.0 - 0.5) * 3.0;
                                 // 0x8000 (digital silence) decodes to +0.00588 through the u8 texture
@@ -2178,11 +2230,10 @@ live_design! {
                                     let audio = floor(raw * half / px) * px / half;
                                     let thick = abs(audio) * half * 2.0;
                                     sdf.hline(half + audio * half * 2.0, max(thick, px));
-                                    let t = step * 4.0;
-                                    let color = mix((COLOR_HOT), (COLOR_FX), t);
-                                    sdf.fill(vec4(color.xyz, 0.35 - t * 0.2))
+                                    let t = min(row, 3.0) / 3.0;
+                                    let color = mix(mix((COLOR_HOT), (COLOR_FX), t), (COLOR_FX), is_grain);
+                                    sdf.fill(vec4(color.xyz, 0.35 - t * 0.15))
                                 }
-                                step += 1.0 / 16.0;
                             }
                             return sdf.result
                         }

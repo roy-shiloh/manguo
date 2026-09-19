@@ -89,7 +89,7 @@ pub enum DisplayAudioAction {
     None
 }
 const WAVE_SIZE_X: usize = 1024;
-const WAVE_SIZE_Y: usize = 16;
+const WAVE_SIZE_Y: usize = 32;
 
 impl LiveHook for DisplayAudio {
 
@@ -116,6 +116,9 @@ impl LiveHook for DisplayAudio {
 
 impl DisplayAudio {
     pub fn process_buffer(&mut self, cx: &mut Cx, chan: Option<usize>, voice: usize, audio: &AudioBuffer, gain:f32) {
+        if voice >= WAVE_SIZE_Y {
+            return;
+        }
         let mut wave_buf = self.wave_texture.take_vec_u32(cx);
         let frames = audio.frame_count();
         let wave_off = self.data_offset[voice];
