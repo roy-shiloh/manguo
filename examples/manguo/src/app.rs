@@ -988,7 +988,7 @@ impl App {
             18 => {
                 log!("AQA: stop recording");
                 granular.shared.record_stop.store(1, Ordering::Relaxed);
-                next = 1.0;
+                next = 2.0;
             }
             _ => {
                 let frames = granular.shared.frames.load(Ordering::Relaxed);
