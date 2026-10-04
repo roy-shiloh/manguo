@@ -780,8 +780,6 @@ impl AudioGraphNode for Node {
             }
             mic[i] = m;
             sum += m * m;
-            self.mic_hist[(self.mic_write as usize) & (MIC_HIST - 1)] = m;
-            self.mic_write += 1;
         }
         self.mic_read = Some(rp);
         if underruns > 0 {
@@ -872,6 +870,12 @@ impl AudioGraphNode for Node {
             // presence envelopes
             self.duck_env += (target - self.duck_env) * duck_a;
             self.gate_env += (target - self.gate_env) * gate_a;
+            // mic gate (Sensitivity): below the threshold nothing enters the
+            // grain history or the dry path, so room/speaker bleed cannot
+            // feed back through the delay
+            let m = mic[i.min(4095)] * self.gate_env;
+            self.mic_hist[(self.mic_write as usize) & (MIC_HIST - 1)] = m;
+            self.mic_write += 1;
 
             // voices
             let mut gl = 0.0f32;
@@ -925,7 +929,6 @@ impl AudioGraphNode for Node {
             }
             let (gl, gr) = (ret[0], ret[1]);
             peak = peak.max(gl.abs()).max(gr.abs());
-            let m = mic[i.min(4095)];
             let synth_g = if gate_on { sg * self.gate_env } else { sg };
             for c in 0..channels {
                 let synth = self.synth_buf.channel(c)[i] * synth_g;

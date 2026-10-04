@@ -1599,7 +1599,10 @@ impl Widget for CheckBox {
     fn data_to_widget(&mut self, cx: &mut Cx, nodes: &[LiveNode], path: &[LiveId]) {
         if let Some(value) = nodes.read_field_value(path) {
             if let Some(value) = value.as_bool() {
-                self.animator_toggle(cx, value, Animate::Yes, id!(active.on), id!(active.off));
+                // re-binding the same value must not restart the toggle animation
+                if self.animator_in_state(cx, id!(active.on)) != value {
+                    self.animator_toggle(cx, value, Animate::Yes, id!(active.on), id!(active.off));
+                }
             }
         }
     }

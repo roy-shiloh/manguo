@@ -160,13 +160,20 @@ impl LiveHook for App{
 
 impl App {
     pub fn init_ui_state(&mut self, cx:&mut Cx){
+        self.sync_synth_ui(cx);
+        let ui = self.ui.clone();
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        let db = DataBindingStore::from_nodes(granular.settings.live_read());
+        Self::granular_bind(db.data_to_widgets(cx, &ui));
+    }
+
+    /// Push only the synth settings to the widgets (voice randomize runs this
+    /// every 60 ms; the grain-delay widgets must not be re-bound at that rate).
+    fn sync_synth_ui(&mut self, cx: &mut Cx) {
         let ui = self.ui.clone();
         let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
         let db = DataBindingStore::from_nodes(ironfish.settings.live_read());
         Self::data_bind(db.data_to_widgets(cx, &ui));
-        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
-        let db = DataBindingStore::from_nodes(granular.settings.live_read());
-        Self::granular_bind(db.data_to_widgets(cx, &ui));
     }
     
     /// Bindings for the grain sequencer (GranularSettings).
@@ -421,8 +428,7 @@ impl MatchEvent for App {
             self.set_voice_enabled(cx, on);
         }
         if let Some(v) = ui.slider(id!(voicesens.slider)).slided(&actions) {
-            // 0..1 -> RMS threshold 0.15 .. 0.005 (log-ish); higher = more sensitive
-            self.set_voice_threshold(0.15 * (0.005f32 / 0.15).powf(v as f32));
+            self.set_voice_threshold(Self::sensitivity_to_threshold(v as f32));
         }
         if let Some(v) = ui.slider(id!(voicechaos.slider)).slided(&actions) {
             self.voice.chaos = v as f32;
@@ -622,7 +628,18 @@ impl App {
         });
     }
 
-    /// Sensitivity drives both the note detector and the presence gate/duck.
+    /// Sensitivity 0..1 -> input RMS threshold 0.15 .. 0.005 (log-ish); higher
+    /// = more sensitive. At 0.00 the mic gate is closed: nothing triggers a
+    /// note, enters the delay or passes dry.
+    fn sensitivity_to_threshold(v: f32) -> f32 {
+        if v <= 0.001 {
+            return 10.0;
+        }
+        0.15 * (0.005f32 / 0.15).powf(v)
+    }
+
+    /// Sensitivity drives the note detector, the mic gate in front of the
+    /// delay/dry path, the synth gate and the duck.
     fn set_voice_threshold(&mut self, th: f32) {
         self.voice.threshold = th;
         let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
@@ -717,7 +734,7 @@ impl App {
             self.voice.last_rand_time = now;
             let ironfish = self.audio_graph.by_type::<IronFish>().unwrap();
             ironfish.settings.randomize(&mut self.voice.seed, self.voice.chaos);
-            self.init_ui_state(cx);
+            self.sync_synth_ui(cx);
         }
     }
 }
