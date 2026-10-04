@@ -250,10 +250,11 @@ impl Widget for Sequencer {
     fn draw_walk(&mut self, cx: &mut Cx2d, _scope: &mut Scope, walk: Walk) -> DrawStep {
         cx.begin_turtle(walk, Layout::default());
                 
-        let start_pos = cx.turtle().pos(); //+ vec2(10., 10.);
-                
+        // cells are always square: fit the smaller dimension, centre horizontally
         let rect = cx.turtle().rect();
-        let sz = rect.size / dvec2(self.grid_x as f64, self.grid_y as f64);
+        let cell = (rect.size.x / self.grid_x as f64).min(rect.size.y / self.grid_y as f64);
+        let sz = dvec2(cell, cell);
+        let start_pos = cx.turtle().pos() + dvec2((rect.size.x - cell * self.grid_x as f64) * 0.5, 0.0);
         let button = self.button;
         for y in 0..self.grid_y {
             for x in 0..self.grid_x {

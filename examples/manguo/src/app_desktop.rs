@@ -12,7 +12,7 @@ live_design! {
 
     FONT_SIZE_H2 = 6.5
 
-    HEIGHT_AUDIOVIZ = 150
+    HEIGHT_AUDIOVIZ = 100
 
     // 8-bit look: one "virtual pixel" in layout points.
     PX = 3.0
@@ -755,9 +755,12 @@ live_design! {
         padding: {left: (SSPACING_2), right: (SSPACING_2)}
     }
 
-    GrainSubTitle = <SubheaderContainer> {
-        margin: {left: (SSPACING_2), right: (SSPACING_2), top: (SSPACING_2), bottom: (SSPACING_0)}
-        title = <FishSubTitle> { label = { text: "Grain", draw_text: {color: (COLOR_HOT)} } }
+    // Group title above a run of sliders
+    GrainLabel = <Label> {
+        width: Fill, height: Fit
+        margin: {top: (SSPACING_2), bottom: 0, left: (SSPACING_1)}
+        draw_text: { text_style: <H2_TEXT_BOLD> {}, color: (COLOR_HOT) }
+        text: "Grain"
     }
 
     SequencerControls = <View> {
@@ -805,29 +808,24 @@ live_design! {
         <LifeControls> {}
     }
 
-    // Grain: what each repeat sounds like
+    // Grain / Motion / Return: one slider column to the right of the grid
     GrainControls = <View> {
         height: Fit,
         width: Fill,
         flow: Down,
-        <GrainSubTitle> {}
-        <GrainRow> {
-            grainsize = <GrainSlider> { slider = { min: 1.0 max: 4.0 default: 2.0 precision: 1 text: "Size" } }
-            grainpitch = <GrainSlider> { slider = { default: 1.0 text: "Pitch" } }
-            grainreverse = <GrainSlider> { slider = { default: 0.0 text: "Reverse" } }
-        }
-        <GrainSubTitle> { title = { label = { text: "Motion" } } }
-        <GrainRow> {
-            grainspray = <GrainSlider> { slider = { default: 0.0 text: "Spray" } }
-            graindensity = <GrainSlider> { slider = { default: 1.0 text: "Density" } }
-            grainwidth = <GrainSlider> { slider = { default: 0.5 text: "Width" } }
-        }
-        <GrainSubTitle> { title = { label = { text: "Return" } } }
-        <GrainRow> {
-            margin: {bottom: (SSPACING_2)}
-            returntone = <GrainBipolarSlider> { slider = { default: 0.0 text: "Tone LP/HP" } }
-            returnduck = <GrainSlider> { slider = { default: 0.0 text: "Duck" } }
-        }
+        spacing: 0
+        padding: {left: (SSPACING_1), right: (SSPACING_2)}
+        <GrainLabel> { text: "Grain" }
+        grainsize = <GrainSlider> { slider = { min: 1.0 max: 4.0 default: 2.0 precision: 1 text: "Size" } }
+        grainpitch = <GrainSlider> { slider = { default: 1.0 text: "Pitch" } }
+        grainreverse = <GrainSlider> { slider = { default: 0.0 text: "Reverse" } }
+        <GrainLabel> { text: "Motion" }
+        grainspray = <GrainSlider> { slider = { default: 0.0 text: "Spray" } }
+        graindensity = <GrainSlider> { slider = { default: 1.0 text: "Density" } }
+        grainwidth = <GrainSlider> { slider = { default: 0.5 text: "Width" } }
+        <GrainLabel> { text: "Return" }
+        returntone = <GrainBipolarSlider> { slider = { default: 0.0 text: "Tone LP/HP" } }
+        returnduck = <GrainSlider> { slider = { default: 0.0 text: "Duck" } }
     }
 
     SequencerPanel = <SquareView> {
@@ -902,12 +900,22 @@ live_design! {
                     }
                 }
 
-                sequencer = <Sequencer> {width: Fill, height: 192, margin: {top: (SSPACING_1)}}
+                <View> {
+                    width: Fill, height: Fit
+                    flow: Right
+                    spacing: (SSPACING_1)
+                    padding: {bottom: (SSPACING_2)}
 
-                <SequencerControls> {}
+                    // the grid, square, with its own controls under it
+                    <View> {
+                        width: 276, height: Fit
+                        flow: Down
+                        sequencer = <Sequencer> {width: Fill, height: 256, margin: {top: (SSPACING_1), bottom: (SSPACING_1), left: (SSPACING_2), right: (SSPACING_2)}}
+                        <SequencerControls> { margin: 0 }
+                    }
 
-                <GrainControls> {}
-
+                    <GrainControls> {}
+                }
             }
         }
     }
@@ -1530,7 +1538,7 @@ live_design! {
     HeaderMenu = <View> {
         width: Fill,
         height: Fit,
-        margin: {top: -150}
+        margin: {top: -100} // = -HEIGHT_AUDIOVIZ: overlays the oscilloscope
         flow: Right,
         spacing: (SSPACING_0),
         align: {x: 0.0, y: 0.0}
@@ -1540,7 +1548,7 @@ live_design! {
             align: {x: 0.0, y: 0.0}
             spacing: 0,
             padding: <SPACING_2> {}
-            height: 150,
+            height: (HEIGHT_AUDIOVIZ),
             width: Fill,
             margin: <SPACING_2> {}
 
@@ -1582,7 +1590,7 @@ live_design! {
                     spacing: (SSPACING_1)
                 }
 
-                logo = <PixelLogo> { width: 272, height: 128 }
+                logo = <PixelLogo> { width: 187, height: 88 }
 
             }
 
@@ -1919,7 +1927,7 @@ live_design! {
                     <FishPanelFilter> {}
                 }
                 effects = <FishPanelEffects> {}
-                <SequencerPanel> {height: Fill, width: 440}
+                <SequencerPanel> {height: Fill, width: 520}
             }
 
             <Play> {}

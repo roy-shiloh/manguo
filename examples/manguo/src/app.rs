@@ -28,7 +28,7 @@ live_design! {
         }
         ui: <Root>{
             main_window = <Window> {
-                window: {inner_size: vec2(1280, 1060), title: "MANGUO 芒果"},
+                window: {inner_size: vec2(1400, 870), title: "MANGUO 芒果"},
                 pass: {clear_color: #x1A0A14}
                 block_signal_event: true;
                 body = <AppDesktop> {}
