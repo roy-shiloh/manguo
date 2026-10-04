@@ -13,6 +13,10 @@
 //!   darkens each generation, Analog loses fidelity and self-oscillates at
 //!   high Repeats, Tape saturates harder every cycle depending on input level.
 //! * With Life off the grid is a static multi-tap delay whose taps decay.
+//! * Performance controls follow the usual granular-delay set: Freeze (hold the
+//!   grid and the grains), Size, Pitch amount, Reverse probability, Spray,
+//!   Density, Width, a Tone filter and Duck on the return, a Dry/Wet mix, and
+//!   a voice-presence Gate on the synth.
 //!
 //! The Life grid is owned by the audio thread. The UI edits it by writing the
 //! `steps` atomics (clicks, seeds, voice stamps); the node diffs them against
@@ -82,8 +86,8 @@ pub struct GranularSettings {
     /// (row 0 is the top / highest pitch). Written by the UI, published by the node.
     #[live]
     pub steps: [u32a; 16],
-    /// delay running (generations happen)
-    #[live(false)]
+    /// delay running (generations happen); on at launch so the grid is live
+    #[live(true)]
     pub running: boola,
     /// Life rules on; off = static multi-tap delay
     #[live(false)]
@@ -96,19 +100,49 @@ pub struct GranularSettings {
     /// regeneration gain per generation
     #[live(0.6)]
     pub repeats: f32a,
-    /// grain overlap: length in slots (1..4)
+    /// hold: no generations, no aging, no new recording
+    #[live(false)]
+    pub freeze: boola,
+    /// grain length in slots (1..4)
     #[live(2.0)]
-    pub smear: f32a,
+    pub size: f32a,
     #[live]
     pub scale: U32A<GrainScale>,
-    /// repeats level (Mix)
-    #[live(0.8)]
-    pub wet: f32a,
-    /// dry microphone level (0: speakers would feed back)
+    /// how much of the row pitch applies (0 = unison delay)
+    #[live(1.0)]
+    pub pitch: f32a,
+    /// probability a grain plays backwards
     #[live(0.0)]
-    pub voice_gain: f32a,
+    pub reverse: f32a,
+    /// random trigger offset, fraction of a slot
+    #[live(0.0)]
+    pub spray: f32a,
+    /// probability a live cell fires when the playhead reaches it
+    #[live(1.0)]
+    pub density: f32a,
+    /// stereo spread by row
+    #[live(0.5)]
+    pub width: f32a,
+    /// return filter: negative = low-pass down to 500 Hz, positive = high-pass up to 2 kHz
+    #[live(0.0)]
+    pub tone: f32a,
+    /// return attenuated while the voice is present
+    #[live(0.0)]
+    pub duck: f32a,
+    /// voice dry (0) .. repeats wet (1), equal power
+    #[live(0.9)]
+    pub mix: f32a,
     #[live(1.0)]
     pub synth_gain: f32a,
+    /// synth level follows voice presence
+    #[live(false)]
+    pub gate: boola,
+    /// gate release, seconds
+    #[live(0.3)]
+    pub gate_release: f32a,
+    /// voice presence threshold (input RMS), written from Voice > Sensitivity
+    #[live(0.03)]
+    pub gate_thresh: f32a,
 }
 
 /// Published by the audio thread for the UI.
@@ -182,6 +216,11 @@ impl AudioComponent for GranularDelay {
             mic_hist: vec![0.0; MIC_HIST],
             mic_write: 0,
             input_level: 0.0,
+            present: false,
+            duck_env: 0.0,
+            gate_env: 0.0,
+            tone_lp: [0.0; 2],
+            tone_hp: [0.0; 2],
             seed: 0x9E37_79B9,
             rec: std::env::var("MANGUO_RECORD_WAV").ok().map(|dir| Recorder::new(dir, 90)),
             debug: std::env::var("MANGUO_LOG_GRAINS").is_ok(),
@@ -224,6 +263,10 @@ struct Voice {
     pos: f64,
     rate: f64,
     len: usize,
+    /// plays the grain backwards
+    reverse: bool,
+    /// spray: samples to wait before the grain starts
+    delay: u32,
     gain: f32,
     gain_l: f32,
     gain_r: f32,
@@ -266,6 +309,13 @@ struct Node {
     mic_write: u64,
     /// smoothed input RMS
     input_level: f32,
+    /// voice presence (hysteresis around gate_thresh) and its envelopes
+    present: bool,
+    duck_env: f32,
+    gate_env: f32,
+    /// return filter states, L/R
+    tone_lp: [f32; 2],
+    tone_hp: [f32; 2],
     seed: u32,
     rec: Option<Recorder>,
     /// dev: MANGUO_LOG_GRAINS prints births/deaths/generations (not realtime-safe)
@@ -361,8 +411,8 @@ impl Node {
     }
 
     fn grain_len(&self) -> usize {
-        let smear = self.settings.smear.get().clamp(1.0, 4.0);
-        ((self.slot_len() as f32 * smear) as usize).clamp(FADE * 2, GRAIN_MAX)
+        let size = self.settings.size.get().clamp(1.0, 4.0);
+        ((self.slot_len() as f32 * size) as usize).clamp(FADE * 2, GRAIN_MAX)
     }
 
     /// Mark a newborn cell: it records the input when the playhead passes its
@@ -567,6 +617,12 @@ impl Node {
     fn trigger_slot(&mut self, x: usize) {
         let scale = self.settings.scale.get();
         let mode = self.settings.mode.get() as u8;
+        let pitch = self.settings.pitch.get().clamp(0.0, 1.0);
+        let reverse = self.settings.reverse.get().clamp(0.0, 1.0);
+        let spray = self.settings.spray.get().clamp(0.0, 1.0);
+        let density = self.settings.density.get().clamp(0.0, 1.0);
+        let width = self.settings.width.get().clamp(0.0, 1.0);
+        let slot_len = self.slot_len() as f32;
         let column = self.grid.cells[x];
         if column == 0 {
             return;
@@ -580,10 +636,15 @@ impl Node {
             if !c.alive || c.pending || c.len == 0 {
                 continue;
             }
+            if density < 1.0 && self.rnd() >= density {
+                continue;
+            }
             let degree = 8 - y as i32;
-            let semis = scale.semitones(degree);
+            let semis = scale.semitones(degree) as f32 * pitch;
             let rate = 2f64.powf(semis as f64 / 12.0);
-            let pan = (y as f32 / (H - 1) as f32) * 1.2 - 0.6;
+            let is_reverse = reverse > 0.0 && self.rnd() < reverse;
+            let delay = if spray > 0.0 { (self.rnd() * spray * slot_len) as u32 } else { 0 };
+            let pan = ((y as f32 / (H - 1) as f32) * 2.0 - 1.0) * width;
             let gl = ((1.0 - pan) * 0.5).sqrt();
             let gr = ((1.0 + pan) * 0.5).sqrt();
             let level = self.input_level;
@@ -615,6 +676,8 @@ impl Node {
                     pos: 0.0,
                     rate,
                     len: c.len,
+                    reverse: is_reverse,
+                    delay,
                     gain: c.gain.min(1.5),
                     gain_l: gl,
                     gain_r: gr,
@@ -727,6 +790,27 @@ impl AudioGraphNode for Node {
         let rms = (sum / frames.max(1) as f32).sqrt();
         self.input_level += (rms - self.input_level) * 0.2;
 
+        // voice presence: measured on the newest input in the ring (not the
+        // 4-buffer-late read position) so the gate and the duck react fast
+        let th = self.settings.gate_thresh.get().max(1e-4);
+        let fresh = {
+            let n = (frames as u64).min(wp).min(4096);
+            let mut s = 0.0f32;
+            for i in 0..n {
+                let m = MIC_RING.get(wp - n + i, wp);
+                s += m * m;
+            }
+            (s / n.max(1) as f32).sqrt()
+        };
+        self.present = if self.present { fresh > th * 0.5 } else { fresh > th };
+        let target = if self.present { 1.0 } else { 0.0 };
+        // one-pole coefficients per buffer: 5 ms attack, duck release 200 ms, gate release as set
+        let attack_a = 1.0 - (-1.0 / (0.005 * SR)).exp();
+        let duck_a = if self.present { attack_a } else { 1.0 - (-1.0 / (0.2 * SR)).exp() };
+        let gate_rel = self.settings.gate_release.get().clamp(0.03, 2.0);
+        let gate_a = if self.present { attack_a } else { 1.0 - (-1.0 / (gate_rel * SR)).exp() };
+        let gate_on = self.settings.gate.get();
+
         // 3. UI edits to the grid
         self.apply_ui_edits();
 
@@ -737,11 +821,22 @@ impl AudioGraphNode for Node {
             self.samples_to_slot = 0;
         }
         self.was_running = running;
+        let freeze = self.settings.freeze.get();
 
-        let wet = self.settings.wet.get();
-        let dry = self.settings.voice_gain.get();
+        // mix: equal-power dry voice / wet repeats
+        let mix = self.settings.mix.get().clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+        let dry = mix.cos();
+        let wet = mix.sin();
+        let duck = self.settings.duck.get().clamp(0.0, 1.0);
         let sg = self.settings.synth_gain.get();
         let dt = 1.0 / SR;
+        // return filter: tone < 0 closes a low-pass (16 kHz .. 500 Hz),
+        // tone > 0 raises a high-pass (30 Hz .. 2 kHz); sub-30 Hz rumble always cut
+        let tone = self.settings.tone.get().clamp(-1.0, 1.0);
+        let lp_cut = 16000.0 * (500.0f32 / 16000.0).powf((-tone).max(0.0));
+        let hp_cut = 30.0 * (2000.0f32 / 30.0).powf(tone.max(0.0));
+        let lp_a = 1.0 - (-std::f32::consts::TAU * lp_cut / SR).exp();
+        let hp_a = 1.0 - (-std::f32::consts::TAU * hp_cut / SR).exp();
 
         let mut disp = display.pop_buffer_resize(frames, channels);
         if let Some(d) = &mut disp {
@@ -759,9 +854,12 @@ impl AudioGraphNode for Node {
         for i in 0..frames {
             if running {
                 if self.samples_to_slot == 0 {
-                    self.record_pending(self.slot);
+                    // frozen: the grid and the grains hold, the playhead keeps replaying
+                    if !freeze {
+                        self.record_pending(self.slot);
+                    }
                     self.slot = (self.slot + 1) % W;
-                    if self.slot == 0 {
+                    if self.slot == 0 && !freeze {
                         self.generation();
                     }
                     self.samples_to_slot = self.slot_len() as u32;
@@ -771,6 +869,10 @@ impl AudioGraphNode for Node {
                 self.samples_to_slot -= 1;
             }
 
+            // presence envelopes
+            self.duck_env += (target - self.duck_env) * duck_a;
+            self.gate_env += (target - self.gate_env) * gate_a;
+
             // voices
             let mut gl = 0.0f32;
             let mut gr = 0.0f32;
@@ -778,18 +880,25 @@ impl AudioGraphNode for Node {
                 if !v.active {
                     continue;
                 }
+                if v.delay > 0 {
+                    v.delay -= 1;
+                    continue;
+                }
                 let base = v.cell * GRAIN_MAX;
-                let ip = v.pos.floor();
-                let f = (v.pos - ip) as f32;
-                let i0 = ip as usize;
-                if i0 + 1 >= v.len {
+                let pi = v.pos.floor() as usize;
+                if pi + 1 >= v.len {
                     v.active = false;
                     continue;
                 }
+                // reverse reads the grain from its end; the window stays symmetric
+                let rp = if v.reverse { (v.len - 1) as f64 - v.pos } else { v.pos };
+                let ip = rp.floor();
+                let f = (rp - ip) as f32;
+                let i0 = (ip as usize).min(v.len - 2);
                 let s = self.grains[base + i0] * (1.0 - f) + self.grains[base + i0 + 1] * f;
                 // 5 ms edges
-                let edge_in = (i0 as f32 / FADE as f32).min(1.0);
-                let edge_out = ((v.len - i0) as f32 / FADE as f32).min(1.0);
+                let edge_in = (pi as f32 / FADE as f32).min(1.0);
+                let edge_out = ((v.len - pi) as f32 / FADE as f32).min(1.0);
                 let win = edge_in * edge_out;
                 let s = Self::degrade(v, s) * win * v.gain;
                 gl += s * v.gain_l;
@@ -805,12 +914,21 @@ impl AudioGraphNode for Node {
                 v.pos += v.rate * wow as f64;
             }
 
-            let gl = (gl * wet).clamp(-1.5, 1.5);
-            let gr = (gr * wet).clamp(-1.5, 1.5);
+            // return: tone filter, duck, wet level
+            let ret_gain = wet * (1.0 - duck * self.duck_env);
+            let mut ret = [gl, gr];
+            for c in 0..2 {
+                self.tone_lp[c] += (ret[c] - self.tone_lp[c]) * lp_a;
+                let x = self.tone_lp[c];
+                self.tone_hp[c] += (x - self.tone_hp[c]) * hp_a;
+                ret[c] = ((x - self.tone_hp[c]) * ret_gain).clamp(-1.5, 1.5);
+            }
+            let (gl, gr) = (ret[0], ret[1]);
             peak = peak.max(gl.abs()).max(gr.abs());
             let m = mic[i.min(4095)];
+            let synth_g = if gate_on { sg * self.gate_env } else { sg };
             for c in 0..channels {
-                let synth = self.synth_buf.channel(c)[i] * sg;
+                let synth = self.synth_buf.channel(c)[i] * synth_g;
                 let grain = if c == 0 { gl } else { gr };
                 output.channel_mut(c)[i] = synth + m * dry + grain;
                 if let Some(d) = &mut disp {

@@ -93,7 +93,6 @@ live_design! {
     PHOTO_CAT = dep("crate://self/resources/voice_cat.jpg")
     PHOTO_ROY = dep("crate://self/resources/voice_roy.jpg")
     ICO_DOWN = dep("crate://self/resources/icons/Icon_Down.svg")
-    ICO_PLAY = dep("crate://self/resources/icons/Icon_Play.svg")
     ICO_SAVE = dep("crate://self/resources/icons/Icon_Save.svg")
     ICO_SEQ_SWEEP = dep("crate://self/resources/icons/Icon_Seq_Sweep.svg")
     ICO_UP = dep("crate://self/resources/icons/Icon_Up.svg")
@@ -317,38 +316,6 @@ live_design! {
         }
         padding: 9.0
         text: ""
-    }
-
-    TextButton = <Button> {
-        align: {x: 0.5, y: 0.5}
-        padding: <SPACING_0> {}
-        margin: {left: 2.5, right: 2.5}
-
-        draw_text: {
-            text_style: <H2_TEXT_BOLD> {}
-            fn get_color(self) -> vec4 {
-                return mix(
-                    mix(
-                        (COLOR_ALERT),
-                        (COLOR_UP_FULL),
-                        self.hover
-                    ),
-                    (COLOR_DOWN_FULL),
-                    self.down
-                )
-            }
-        }
-
-        draw_bg: {
-            instance hover: 0.0
-            instance down: 0.0
-
-            fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size);
-                return sdf.result
-            }
-        }
-
     }
 
     FishButton = <Button> {
@@ -610,229 +577,6 @@ live_design! {
         }
     }
 
-    CheckboxTextual = <CheckBox> {
-        draw_bg: {
-            fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-
-                return sdf.result
-            }
-        }
-
-        draw_text: {
-            text_style: <H2_TEXT_REGULAR> {},
-            fn get_color(self) -> vec4 {
-                return mix(
-                    (COLOR_UP_4),
-                    (COLOR_UP_6),
-                    self.active
-                )
-            }
-        }
-
-        label_walk: {margin: {left: 0.0}}
-
-    }
-
-    PlayPause = <FishToggle> {
-        width: Fit,
-        height: Fit,
-        margin: <SPACING_3> {}
-        align: {x: 0.5, y: 0.5}
-        checkbox = {
-            width: 30,
-            height: 30,
-            margin: {right: -20}
-            text: ""
-            animator: {
-                hover = {
-                    default: off
-                    off = {
-                        from: {all: Forward {duration: 0.1}}
-                        apply: {
-                            draw_bg: {hover: 0.0}
-                        }
-                    }
-                    on = {
-                        from: {all: Snap}
-                        apply: {
-                            draw_bg: {hover: 1.0}
-                        }
-                    }
-                }
-                focus = {
-                    default: off
-                    off = {
-                        from: {all: Forward {duration: 0.0}}
-                        apply: {
-                            draw_bg: {focus: 0.0}
-                        }
-                    }
-                    on = {
-                        from: {all: Snap}
-                        apply: {
-                            draw_bg: {focus: 1.0}
-                        }
-                    }
-                }
-                active = {
-                    default: off
-                    off = {
-                        from: {all: Forward {duration: 0.0}}
-                        apply: {draw_bg: {active: 0.0}}
-                    }
-                    on = {
-                        cursor: Arrow,
-                        from: {all: Forward {duration: 0.0}}
-                        apply: {draw_bg: {active: 1.0}}
-                    }
-                }
-            }
-            draw_bg: {
-                fn pixel(self) -> vec4 {
-                    let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                    let sz = self.rect_size.x;
-                    let c = vec2(self.rect_size.x, self.rect_size.y);
-                    let pad = 0.35;
-                    sdf.rect(0., 0., self.rect_size.x, self.rect_size.y)
-
-                    sdf.fill_keep(
-                        mix(
-                            mix((COLOR_PANEL_2), (COLOR_MAGENTA), self.hover * 0.5),
-                            (COLOR_HOT),
-                            self.active
-                        )
-                    )
-
-                    sdf.stroke_keep(mix((COLOR_UP_4), (COLOR_HILITE), self.active), 2.0);
-
-                    sdf.subtract()
-
-                    let padx = c.x * pad;
-                    let pady = c.y * pad;
-
-                    sdf.move_to(c.x - sz + padx, c.y - sz + pady);
-                    sdf.line_to(c.x - padx, c.y * 0.5);
-                    sdf.line_to(0.0 + padx, c.y - pady);
-                    sdf.close_path();
-
-                    sdf.fill_keep(mix((COLOR_PALE), (COLOR_HILITE), self.hover + self.active))
-
-                    return sdf.result
-                }
-            }
-        }
-    }
-
-    FishCheckbox = <CheckBox> {
-        draw_bg: {
-            fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-
-                let left = 1;
-                let sz = 6.5;
-
-                let c = vec2(left + sz, self.rect_size.y * 0.5 - 2.0);
-
-                sdf.rect(left, c.y - sz, sz * 2.5, sz * 2.5);
-                sdf.fill_keep(mix((COLOR_DOWN_4), (COLOR_MAGENTA), self.active))
-                sdf.stroke(mix((COLOR_UP_3), (COLOR_UP_5), self.hover), 2.0) // outline
-
-                let szs = sz * 0.5;
-                let dx = 1.0;
-
-                let offset = 1.5;
-
-                sdf.move_to(left + 4.0 + offset, c.y + offset);
-                sdf.line_to(c.x + offset, c.y + szs + offset);
-                sdf.line_to(c.x + szs + offset, c.y - szs + offset);
-
-                sdf.stroke_keep(mix((COLOR_UP_0), (COLOR_HILITE), self.active), 2.0);
-
-                return sdf.result
-            }
-        }
-
-        label_walk: {margin: {left: 23.0}}
-
-        draw_text: {
-            text_style: <H2_TEXT_BOLD> {},
-            fn get_color(self) -> vec4 {
-                return (COLOR_UP_5)
-            }
-        }
-    }
-
-    FishInput = <TextInput> {
-        width: Fill,
-        height: Fit,
-        margin: 0
-
-        clip_x: true,
-        clip_y: true,
-        align: {y: 0.5},
-        text: "Search"
-        
-        draw_bg: {
-            fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-                sdf.rect(0.0, 0.0, self.rect_size.x, self.rect_size.y)
-                sdf.fill_keep((COLOR_DOWN_4))
-                sdf.stroke((COLOR_UP_3), 2.0)
-                return sdf.result;
-            }
-        },
-        draw_text: {
-            text_style: <H2_TEXT_REGULAR> {},
-        }
-    }
-
-    PresetFavorite = <CheckBox> {
-        height: Fit,
-        width: Fit,
-        margin: 0.0
-        padding: 0.0
-
-        draw_bg: {
-            fn pixel(self) -> vec4 {
-                let sdf = Sdf2d::viewport(self.pos * self.rect_size)
-
-                let left = 1;
-                let sz = self.rect_size.x / 2;
-                let c = vec2(sz, sz);
-
-                let csz = 4.0;
-                sdf.circle(csz, csz, csz);
-                sdf.circle(csz * 3, csz, csz);
-                sdf.union();
-
-                let squeeze = sz * 0.025;
-                let top_offset = 0.6;
-                // let top_offset = 0.6;
-                sdf.move_to(c.x - sz + squeeze + 1.0, c.y - (sz * top_offset));
-                sdf.line_to(c.x - sz * 0.5, c.y - (sz * 0.8));
-                sdf.line_to(c.x - squeeze, c.y - (sz * top_offset));
-                sdf.line_to(c.x * 0.5, c.y);
-                sdf.close_path();
-
-                sdf.fill_keep(
-                    mix(
-                        mix((COLOR_DOWN_4), (COLOR_UP_3), self.hover),
-                        mix((COLOR_MAGENTA), (COLOR_HOT), self.hover),
-                        self.active
-                    )
-                )
-
-
-                return sdf.result
-            }
-        }
-        draw_text: {
-            text_style: <H2_TEXT_BOLD> {},
-            color: (COLOR_UP_6)
-        }
-    }
-
 
     // PANELS
     EnvelopePanel = <SquareView> {
@@ -976,18 +720,44 @@ live_design! {
             width: Fit
             checkbox = { text: "Life", width: Fit, padding: {right: (SSPACING_2)} }
         }
-        repeats = <InstrumentSlider> {
-            width: Fill
-            slider = {
-                draw_bg: {line_color: (COLOR_HOT)}
-                min: 0.0
-                max: 1.0
-                default: 0.6
-                text: "Repeats"
-            }
-        }
+        <FillerH> {}
         lifeseed = <PxButton> { icon = { source: (PX_SEED) } }
         lifewindow = <PxButton> { icon = { source: (PX_SPIRAL) } }
+    }
+
+    // Small toggle with a text label (Freeze, Gate, Arp)
+    LabelToggle = <FishToggle> {
+        width: Fit, height: Fit
+        margin: <SPACING_0> {}
+        padding: <SPACING_0> {}
+        checkbox = { width: Fit, text: "Freeze", padding: {right: (SSPACING_2)} }
+    }
+
+    GrainSlider = <InstrumentSlider> {
+        width: Fill
+        margin: <SPACING_0> {}
+        padding: <SPACING_0> {}
+        slider = { draw_bg: {line_color: (COLOR_HOT)} min: 0.0 max: 1.0 }
+    }
+
+    GrainBipolarSlider = <InstrumentBipolarSlider> {
+        width: Fill
+        margin: <SPACING_0> {}
+        padding: <SPACING_0> {}
+        slider = { draw_bg: {line_color: (COLOR_HOT)} min: -1.0 max: 1.0 }
+    }
+
+    GrainRow = <View> {
+        height: Fit,
+        width: Fill,
+        flow: Right,
+        spacing: (SSPACING_3)
+        padding: {left: (SSPACING_2), right: (SSPACING_2)}
+    }
+
+    GrainSubTitle = <SubheaderContainer> {
+        margin: {left: (SSPACING_2), right: (SSPACING_2), top: (SSPACING_2), bottom: (SSPACING_0)}
+        title = <FishSubTitle> { label = { text: "Grain", draw_text: {color: (COLOR_HOT)} } }
     }
 
     SequencerControls = <View> {
@@ -1035,112 +805,29 @@ live_design! {
         <LifeControls> {}
     }
 
-    Arp = <GradientYView> {
-        flow: Down,
-        padding: <SPACING_0> {}
-        spacing: (SSPACING_2)
-        height: Fit,
-        width: 120,
-        margin: <SPACING_0> {}
-        draw_bg: {color_1: (COLOR_UP_0), color_2: (COLOR_UP_0)}
-
-        <View> {
-            flow: Right,
-            align: {x: 0.0, y: 0.0} padding: <SPACING_0> {}
-            width: Fill,
-            height: Fit,
-            margin: <SPACING_0> {}
-
-            <SubheaderContainer> {
-                margin: <SPACING_0> {}
-                <FishSubTitle> {
-                    label = {
-                        text: "Arp",
-                        draw_text: {color: (COLOR_DEFAULT)},
-                    }
-                }
-
-                <FillerH> {}
-
-                arp = <FishToggle> {
-                    margin: <SPACING_0> {}
-                    padding: <SPACING_0> {}
-                    checkbox = {
-                        text: " "
-                        padding: {top: (SSPACING_0), right: (SSPACING_1), bottom: (SSPACING_0), left: (SSPACING_0)}
-                        margin: <SPACING_0> {}
-                    }
-                    width: Fit,
-                    height: Fit,
-                    margin: <SPACING_0> {}
-                }
-            }
-
-
-        }
-
-        arpoctaves = <InstrumentBipolarSlider> {
-            width: Fill,
-            margin: <SPACING_0> {}
-            padding: <SPACING_0> {}
-            slider = {
-                draw_bg: {line_color: (COLOR_DEFAULT)}
-                min: -4.0
-                max: 4.0
-                step: 1.0
-                precision: 0,
-                text: "Octaves"
-            }
-        }
-    }
-
-    PianoSettings = <View> {
-        flow: Down,
-        padding: <SPACING_0> {} spacing: (SSPACING_2)
-        height: Fit,
-        width: 120,
-        margin: <SPACING_0> {}
-
-        <SubheaderContainer> {
-            margin: <SPACING_0> {}
-            <FishSubTitle> {
-                label = {
-                    text: "Settings",
-                    draw_text: {color: (COLOR_DEFAULT)},
-                }
-            }
-        }
-
-        porta = <InstrumentSlider> {
-            width: Fill,
-            margin: <SPACING_0> {}
-            padding: <SPACING_0> {}
-            slider = {
-                width: Fill
-                draw_bg: {line_color: (COLOR_DEFAULT)}
-                min: 0.0
-                max: 1.0
-                text: "Portamento"
-            }
-        }
-    }
-
-    GrainSlider = <InstrumentSlider> {
-        width: Fill
-        margin: <SPACING_0> {}
-        padding: <SPACING_0> {}
-        slider = { draw_bg: {line_color: (COLOR_HOT)} min: 0.0 max: 1.0 }
-    }
-
-    // Grain shape
+    // Grain: what each repeat sounds like
     GrainControls = <View> {
         height: Fit,
         width: Fill,
-        margin: {left: (SSPACING_1), right: (SSPACING_1), bottom: (SSPACING_1)}
-        flow: Right,
-        padding: {left: (SSPACING_2), right: (SSPACING_2), bottom: (SSPACING_1)}
-        spacing: (SSPACING_1)
-        smear = <GrainSlider> { slider = { min: 1.0 max: 4.0 default: 2.0 precision: 1 text: "Smear (slots)" } }
+        flow: Down,
+        <GrainSubTitle> {}
+        <GrainRow> {
+            grainsize = <GrainSlider> { slider = { min: 1.0 max: 4.0 default: 2.0 precision: 1 text: "Size" } }
+            grainpitch = <GrainSlider> { slider = { default: 1.0 text: "Pitch" } }
+            grainreverse = <GrainSlider> { slider = { default: 0.0 text: "Reverse" } }
+        }
+        <GrainSubTitle> { title = { label = { text: "Motion" } } }
+        <GrainRow> {
+            grainspray = <GrainSlider> { slider = { default: 0.0 text: "Spray" } }
+            graindensity = <GrainSlider> { slider = { default: 1.0 text: "Density" } }
+            grainwidth = <GrainSlider> { slider = { default: 0.5 text: "Width" } }
+        }
+        <GrainSubTitle> { title = { label = { text: "Return" } } }
+        <GrainRow> {
+            margin: {bottom: (SSPACING_2)}
+            returntone = <GrainBipolarSlider> { slider = { default: 0.0 text: "Tone LP/HP" } }
+            returnduck = <GrainSlider> { slider = { default: 0.0 text: "Duck" } }
+        }
     }
 
     SequencerPanel = <SquareView> {
@@ -1187,29 +874,9 @@ live_design! {
                     spacing: (SSPACING_4),
                     padding: {top: (SSPACING_1), right: (SSPACING_3), bottom: (SSPACING_0), left: (SSPACING_0)}
 
-                    playpause = <CheckBox> {
-                        draw_bg: {check_type: None}
-                        draw_icon: {svg_file: (ICO_PLAY)}
-                        icon_walk: {
-                            width: 25.0,
-                            height: Fit,
-                            margin: 0,
-                        }
+                    playpause = <LabelToggle> { margin: {left: (SSPACING_2)} checkbox = { text: "Run" } }
 
-                        margin: {
-                            top: 0,
-                            right: -10,
-                            bottom: 0,
-                            left: 0,
-                        }
-
-                        padding: {
-                            top: 2,
-                            right: 0,
-                            bottom: 0,
-                            left: 15,
-                        }
-                    }
+                    freeze = <LabelToggle> { checkbox = { text: "Freeze" } }
 
                     delaytime = <InstrumentSlider> {
                         width: Fill
@@ -1219,7 +886,18 @@ live_design! {
                             max: 2.0
                             default: 0.5
                             precision: 2
-                            text: "Time (s)"
+                            text: "Time s"
+                        }
+                    }
+
+                    repeats = <InstrumentSlider> {
+                        width: Fill
+                        slider = {
+                            draw_bg: {line_color: (COLOR_HOT)}
+                            min: 0.0
+                            max: 1.0
+                            default: 0.6
+                            text: "Repeats"
                         }
                     }
                 }
@@ -1914,12 +1592,12 @@ live_design! {
 
     }
 
-    // Output mix: grains / dry voice / synth
+    // Voice path: mic gain, then dry voice vs repeats
     MixSettings = <View> {
         flow: Down,
         padding: <SPACING_0> {} spacing: (SSPACING_2)
         height: Fit,
-        width: 300,
+        width: 230,
         margin: {left: (SSPACING_2)}
 
         <SubheaderContainer> {
@@ -1933,9 +1611,48 @@ live_design! {
         }
         <View> {
             width: Fill, height: Fit, flow: Right, spacing: (SSPACING_1)
-            grainwet = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 0.8 text: "Grains" } }
-            mixvoice = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 0.0 text: "Dry voice" } }
-            mixsynth = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 1.0 text: "Synth" } }
+            mixinput = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} min: 0.0 max: 4.0 default: 1.0 precision: 2 text: "Input" } }
+            mixdrywet = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_FX)} default: 0.9 text: "Dry / Wet" } }
+        }
+    }
+
+    // Synth: gated by the voice, level, glide, arp
+    SynthSettings = <View> {
+        flow: Down,
+        padding: <SPACING_0> {} spacing: (SSPACING_1)
+        height: Fit,
+        width: 400,
+        margin: {left: (SSPACING_2)}
+
+        <SubheaderContainer> {
+            margin: <SPACING_0> {}
+            <FishSubTitle> {
+                label = {
+                    text: "Synth",
+                    draw_text: {color: (COLOR_OSC)},
+                }
+            }
+            <FillerH> {}
+            synthgate = <LabelToggle> { checkbox = { text: "Gate" } }
+        }
+        <View> {
+            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_2)
+            gaterelease = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_OSC)} min: 0.03 max: 2.0 default: 0.3 precision: 2 text: "Release" } }
+            synthlevel = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_OSC)} default: 1.0 text: "Level" } }
+            porta = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_OSC)} default: 0.0 text: "Glide" } }
+        }
+        <View> {
+            width: Fill, height: Fit, flow: Right, spacing: (SSPACING_2)
+            align: {x: 0.0, y: 0.5}
+            arp = <LabelToggle> { checkbox = { text: "Arp" } }
+            arpoctaves = <GrainBipolarSlider> {
+                slider = {
+                    draw_bg: {line_color: (COLOR_OSC)}
+                    min: -4.0 max: 4.0 step: 1.0 precision: 0, default: 0.0
+                    text: "Octaves"
+                }
+            }
+            arprate = <GrainSlider> { slider = { draw_bg: {line_color: (COLOR_OSC)} min: 40.0 max: 300.0 default: 125.0 precision: 0 text: "Rate bpm" } }
         }
     }
 
@@ -2084,13 +1801,13 @@ live_design! {
         margin: {top: (SSPACING_0), right: (SSPACING_3), bottom: (SSPACING_3), left: (SSPACING_3)}
         draw_bg: {color_1: (COLOR_UP_3), color_2: (COLOR_UP_1)}
 
-        <Arp> {}
+        <VoiceSettings> {}
+        <SynthSettings> {}
+        <MixSettings> {}
         <ScrollXView> {
+            margin: {left: (SSPACING_2)}
             piano = <Piano> {height: Fit, width: Fill, margin: {top: (SSPACING_0), right: (SSPACING_2); bottom: (SSPACING_3), left: (SSPACING_2)}}
         }
-        <PianoSettings> {}
-        <MixSettings> {}
-        <VoiceSettings> {}
     }
 
 
@@ -2122,33 +1839,6 @@ live_design! {
         }
     }
  
-    PresetHeader = <View> {
-        width: Fill,
-        height: Fit,
-        margin: {top: 0, right: (SSPACING_4), bottom: 0, left: (SSPACING_4)}
-        flow: Down,
-        spacing: (SSPACING_2),
-        padding: 0
-
-            <SubheaderContainer> {
-            <FishSubTitle> {
-                width: Fill
-                label = {
-                    text: "Browse",
-                    draw_text: {color: (COLOR_UP_6)}
-                }
-            }
-
-            <FillerH> {}
-            <CheckboxTextual> {text: "Synth", width: Fit}
-            <CheckboxTextual> {text: "Seq", width: Fit}
-            <CheckboxTextual> {text: "Fav", width: Fit}
-        }
-
-        <FishInput> {}
-
-    }
-    
     pub AppDesktop = <View>{
         flow: Right
         width: Fill,
@@ -2229,7 +1919,7 @@ live_design! {
                     <FishPanelFilter> {}
                 }
                 effects = <FishPanelEffects> {}
-                <SequencerPanel> {height: Fill, width: Fill}
+                <SequencerPanel> {height: Fill, width: 440}
             }
 
             <Play> {}

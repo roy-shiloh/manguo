@@ -45,12 +45,19 @@ live_design! {
 app_main!(App);
 
 /// Published by the audio-input callback, read on the UI thread. Lock-free.
-#[derive(Default)]
 pub struct VoiceShared {
     /// RMS level of the last input buffer, as f32 bits
     level: AtomicU32,
     /// Estimated fundamental in Hz (0 when unsure), as f32 bits
     pitch_hz: AtomicU32,
+    /// Mix > Input: mic gain applied before detection, grains and dry path, f32 bits
+    input_gain: AtomicU32,
+}
+
+impl Default for VoiceShared {
+    fn default() -> Self {
+        Self { level: AtomicU32::new(0), pitch_hz: AtomicU32::new(0), input_gain: AtomicU32::new(1.0f32.to_bits()) }
+    }
 }
 
 impl VoiceShared {
@@ -165,21 +172,31 @@ impl App {
     /// Bindings for the grain sequencer (GranularSettings).
     pub fn granular_bind(mut db: DataBindingMap) {
         db.bind(id!(steps), ids!(sequencer));
-        db.bind(id!(running), ids!(playpause));
+        db.bind(id!(running), ids!(playpause.checkbox));
+        db.bind(id!(freeze), ids!(freeze.checkbox));
         db.bind(id!(time), ids!(delaytime.slider));
         db.bind(id!(repeats), ids!(repeats.slider));
-        db.bind(id!(smear), ids!(smear.slider));
         db.bind(id!(mode), ids!(delaymode.dropdown));
         db.bind(id!(scale), ids!(scaletype.dropdown));
-        db.bind(id!(wet), ids!(grainwet.slider));
-        db.bind(id!(voice_gain), ids!(mixvoice.slider));
-        db.bind(id!(synth_gain), ids!(mixsynth.slider));
+        db.bind(id!(pitch), ids!(grainpitch.slider));
+        db.bind(id!(size), ids!(grainsize.slider));
+        db.bind(id!(reverse), ids!(grainreverse.slider));
+        db.bind(id!(spray), ids!(grainspray.slider));
+        db.bind(id!(density), ids!(graindensity.slider));
+        db.bind(id!(width), ids!(grainwidth.slider));
+        db.bind(id!(tone), ids!(returntone.slider));
+        db.bind(id!(duck), ids!(returnduck.slider));
+        db.bind(id!(mix), ids!(mixdrywet.slider));
+        db.bind(id!(synth_gain), ids!(synthlevel.slider));
+        db.bind(id!(gate), ids!(synthgate.checkbox));
+        db.bind(id!(gate_release), ids!(gaterelease.slider));
     }
 
     /// Bindings for the synth (IronFishSettings).
     pub fn data_bind(mut db: DataBindingMap) {
         db.bind(id!(arp.enabled), ids!(arp.checkbox));
         db.bind(id!(arp.octaves), ids!(arpoctaves.slider));
+        db.bind(id!(sequencer.bpm), ids!(arprate.slider));
 
         // Mixer panel
         db.bind(id!(osc_balance), ids!(balance.slider));
@@ -231,7 +248,7 @@ impl App {
         db.bind(id!(filter1.envelope_amount), ids!(modamount.slider));
 
         // Filter panel
-        //db.bind(id!(filter1.filter_type), ids!(filter_type.dropdown));
+        db.bind(id!(filter1.filter_type), ids!(filter_type));
         db.bind(id!(filter1.cutoff), ids!(cutoff.slider));
         db.bind(id!(filter1.resonance), ids!(resonance.slider));
 
@@ -339,6 +356,7 @@ impl MatchEvent for App {
         self.ui.piano(id!(piano)).set_key_focus(cx);
         self.midi_input = cx.midi_input();
         self.start_voice_input(cx);
+        self.set_voice_threshold(self.voice.threshold);
         // Dev/verification: MANGUO_OPEN_LIFE=grid|fractal opens the life window running.
         if std::env::var("MANGUO_VOICE_TEST").is_ok() && std::env::var("MANGUO_AUDIO_QA").is_err() {
             self.set_voice_enabled(cx, true);
@@ -404,10 +422,13 @@ impl MatchEvent for App {
         }
         if let Some(v) = ui.slider(id!(voicesens.slider)).slided(&actions) {
             // 0..1 -> RMS threshold 0.15 .. 0.005 (log-ish); higher = more sensitive
-            self.voice.threshold = 0.15 * (0.005f32 / 0.15).powf(v as f32);
+            self.set_voice_threshold(0.15 * (0.005f32 / 0.15).powf(v as f32));
         }
         if let Some(v) = ui.slider(id!(voicechaos.slider)).slided(&actions) {
             self.voice.chaos = v as f32;
+        }
+        if let Some(v) = ui.slider(id!(mixinput.slider)).slided(&actions) {
+            self.voice.shared.input_gain.store((v as f32).to_bits(), Ordering::Relaxed);
         }
 
         // Game of Life controls (present in both windows; ids are shared)
@@ -525,10 +546,11 @@ impl App {
                 return;
             }
             let ch = input.channel(0);
+            let gain = f32::from_bits(shared.input_gain.load(Ordering::Relaxed));
             let mut sum = 0.0f32;
             let mut n = 0usize;
             for i in 0..frames {
-                let mut s = ch[i];
+                let mut s = ch[i] * gain;
                 if let Some(hz) = test_hz {
                     test_frames += 1;
                     phase = (phase + hz / 48000.0).fract();
@@ -598,6 +620,13 @@ impl App {
             shared.pitch_hz.store(pitch.to_bits(), Ordering::Relaxed);
             SignalToUI::set_ui_signal();
         });
+    }
+
+    /// Sensitivity drives both the note detector and the presence gate/duck.
+    fn set_voice_threshold(&mut self, th: f32) {
+        self.voice.threshold = th;
+        let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
+        granular.settings.gate_thresh.set(th);
     }
 
     fn set_voice_enabled(&mut self, cx: &mut Cx, on: bool) {
@@ -768,7 +797,7 @@ impl App {
             // generations only happen while the delay runs
             let granular = self.audio_graph.by_type::<GranularDelay>().unwrap();
             granular.settings.running.set(true);
-            self.ui.check_box_set(ids!(playpause)).set_active(cx, true);
+            self.ui.check_box_set(ids!(playpause.checkbox)).set_active(cx, true);
         }
     }
 
@@ -833,8 +862,17 @@ impl App {
                 g.mode.set(DelayMode::Digital);
                 g.time.set(0.5);
                 g.repeats.set(0.7);
-                g.smear.set(2.0);
-                g.wet.set(0.8);
+                g.size.set(2.0);
+                g.mix.set(1.0);
+                g.pitch.set(1.0);
+                g.reverse.set(0.0);
+                g.spray.set(0.0);
+                g.density.set(1.0);
+                g.width.set(0.5);
+                g.tone.set(0.0);
+                g.duck.set(0.0);
+                g.freeze.set(false);
+                g.gate.set(false);
                 g.life.set(false);
                 g.running.set(true);
                 next = 1.5; // t = 2.0, inside burst 1 (0..3)
@@ -883,6 +921,71 @@ impl App {
                 next = 7.0; // t = 31.5
             }
             8 => {
+                log!("AQA: E gate: grid clear, life off, synth note held, gate on (release 0.1)");
+                self.aqa_grid(cx, &[]);
+                g.life.set(false);
+                self.life.enabled = false;
+                g.gate.set(true);
+                g.gate_release.set(0.1);
+                g.synth_gain.set(1.0);
+                self.audio_graph.send_midi_data(MidiNote { channel: 0, is_on: true, note_number: 60, velocity: 100 }.into());
+                next = 8.0; // t = 39.5, covers burst 5 (32..35) and the gap after it
+            }
+            9 => {
+                log!("AQA: F duck 1.0: note off, gate off, digital repeats 1.0");
+                self.audio_graph.send_midi_data(MidiNote { channel: 0, is_on: false, note_number: 60, velocity: 0 }.into());
+                g.gate.set(false);
+                g.duck.set(1.0);
+                g.mode.set(DelayMode::Digital);
+                g.repeats.set(1.0);
+                next = 1.0; // t = 40.5, inside burst 6 (40..43)
+            }
+            10 => {
+                log!("AQA: F stamp");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 10.0; // t = 50.5: ducked 41..43, open 43..48, ducked 48..51
+            }
+            11 => {
+                log!("AQA: G dry/wet: grid clear, duck 0, mix 0 (dry voice only)");
+                self.aqa_grid(cx, &[]);
+                g.duck.set(0.0);
+                g.mix.set(0.0);
+                next = 7.0; // t = 57.5, inside burst 8 (56..59)
+            }
+            12 => {
+                log!("AQA: G mix 1 (dry gone)");
+                g.mix.set(1.0);
+                next = 1.0; // t = 58.5, still inside burst 8
+            }
+            13 => {
+                log!("AQA: H freeze: digital repeats 0.5");
+                g.repeats.set(0.5);
+                next = 6.0; // t = 64.5, inside burst 9 (64..67)
+            }
+            14 => {
+                log!("AQA: H stamp");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 1.2; // t = 65.7: cells recorded, first repeat played
+            }
+            15 => {
+                log!("AQA: H freeze on");
+                g.freeze.set(true);
+                next = 6.0; // t = 71.7
+            }
+            16 => {
+                log!("AQA: I reverse 1.0: freeze off, grid clear, repeats 0.7");
+                g.freeze.set(false);
+                self.aqa_grid(cx, &[]);
+                g.reverse.set(1.0);
+                g.repeats.set(0.7);
+                next = 0.8; // t = 72.5, inside burst 10 (72..75)
+            }
+            17 => {
+                log!("AQA: I stamp");
+                self.aqa_grid(cx, &[(4, 8), (5, 8), (6, 8)]);
+                next = 5.0; // t = 77.5
+            }
+            18 => {
                 log!("AQA: stop recording");
                 granular.shared.record_stop.store(1, Ordering::Relaxed);
                 next = 1.0;
@@ -963,8 +1066,18 @@ impl App {
                 let t = (step - 32) as f32 / 5.0;
                 granular.settings.time.set(0.1 + 1.9 * t);
                 granular.settings.repeats.set(t);
-                granular.settings.smear.set(1.0 + 3.0 * t);
-                granular.settings.wet.set(0.3 + 0.7 * t);
+                granular.settings.size.set(1.0 + 3.0 * t);
+                granular.settings.mix.set(0.3 + 0.7 * t);
+                granular.settings.pitch.set(1.0 - t);
+                granular.settings.reverse.set(t);
+                granular.settings.spray.set(t);
+                granular.settings.density.set(1.0 - 0.7 * t);
+                granular.settings.width.set(t);
+                granular.settings.tone.set(2.0 * t - 1.0);
+                granular.settings.duck.set(t);
+                granular.settings.freeze.set(step % 2 == 1);
+                granular.settings.gate.set(step % 2 == 0);
+                granular.settings.gate_release.set(0.03 + 2.0 * t);
                 granular.settings.mode.set(match step % 3 { 0 => DelayMode::Digital, 1 => DelayMode::Analog, _ => DelayMode::Tape });
                 log!("QA: delay sweep t={:.1} mode {:?}", t, granular.settings.mode.get());
                 self.init_ui_state(cx);

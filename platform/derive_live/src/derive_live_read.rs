@@ -56,7 +56,8 @@ fn derive_live_read_impl_inner(parser: &mut TokenParser, tb: &mut TokenBuilder) 
         tb.add("    fn live_read_to(&self, id:LiveId, out:&mut Vec<LiveNode>){");
         tb.add("        out.push(LiveNode::from_id_value(id, LiveValue::Object));");
         for field in &fields {
-            if field.attrs[0].name == "live"{
+            // doc comments arrive as #[doc] attributes ahead of #[live]
+            if field.attrs.iter().any(|a| a.name == "live") {
                 tb.add("self.").ident(&field.name).add(".live_read_to(LiveId(").suf_u64(LiveId::from_str(&field.name).0).add("), out);");
             }
         }
