@@ -1,0 +1,32 @@
+[package]
+name = "manguo_grain"
+version = "0.1.0"
+authors = ["Makepad <info@makepad.nl>"]
+edition = "2021"
+description = "Manguo Grain: Game-of-Life granular delay as a VST3/CLAP plugin"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/makepad/makepad/"
+repository = "https://github.com/makepad/makepad/"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "manguo_grain_standalone"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+default = []
+# Standalone test host (nice-plug's wrapper): `--backend dummy` runs the
+# editor and the process loop without touching audio devices.
+standalone = ["nice-plug/standalone"]
+
+[dependencies]
+makepad-widgets = { path = "../../widgets", version = "0.6.0" }
+nice-plug = { version = "0.4.2", default-features = false, features = ["editor", "vst3"] }
+baseview = "0.3.4"
+keyboard-types = "0.8"
+raw-window-handle = "0.6"
+serde = { version = "1.0", features = ["derive"] }

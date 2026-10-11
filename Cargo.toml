@@ -2,6 +2,7 @@ workspace.members = [
     # === examples ===
     "examples/chatgpt",
     "examples/manguo",
+    "examples/manguo_grain",
     "examples/teamtalk",
     "examples/fractal_zoom",
     "examples/simple",

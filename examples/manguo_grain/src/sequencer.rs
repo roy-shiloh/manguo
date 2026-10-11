@@ -1,0 +1,382 @@
+use crate::makepad_widgets::*;
+
+live_design!{
+    use link::shaders::*;
+    
+    DrawButton = {{DrawButton}} {
+        
+        // 8-bit cell: square with a 2px bevel. Dead = dark plum, alive = hot pink,
+        // the playing column is highlighted.
+        fn pixel(self) -> vec4 {
+            let p = self.pos * self.rect_size;
+            let gap = 2.0;
+            let bw = 2.0;
+            let w = self.rect_size.x - gap;
+            let h = self.rect_size.y - gap;
+            if (p.x >= w || p.y >= h) {
+                return vec4(0.0);
+            }
+            let dead = mix(#x2B1020FF, #x3A1530FF, self.hover);
+            let alive = mix(#xE0218AFF, #xFF3FA4FF, self.hover);
+            let fill = mix(dead, alive, self.active);
+            let fill = mix(fill, mix(#x6A2A55FF, #xFFE1F0FF, self.active), self.active_step);
+            let light = mix(#xFFB3DA30, #xFFE1F0FF, self.active);
+            let dark = mix(#x0A0208CC, #x8A105AFF, self.active);
+            let on_light = step(p.x, bw) + step(p.y, bw);
+            let on_dark = step(w - bw, p.x) + step(h - bw, p.y);
+            if on_dark > 0.0 {
+                return Pal::premul(dark);
+            }
+            if on_light > 0.0 {
+                return Pal::premul(light);
+            }
+            return Pal::premul(fill);
+        }
+    }
+    
+    SeqButton = {{SeqButton}} {
+        animator: {
+            hover = {
+                default: off,
+                off = {
+                    from: {all: Forward {duration: 0.2}}
+                    apply: {draw_button: {hover: 0.0}}
+                }
+                
+                on = {
+                    from: {all: Snap}
+                    apply: {draw_button: {hover: 1.0}}
+                }
+            }
+            
+            active = {
+                default: off
+                off = {
+                    from: {all: Forward {duration: 0.15}}
+                    apply: {draw_button: {active: 0.0}}
+                }
+                
+                on = {
+                    from: {all: Snap}
+                    apply: {draw_button: {active: 1.0}}
+                }
+            }
+        }
+    }
+    
+    pub Sequencer = {{Sequencer}} {
+        current_step: 0,
+        button: <SeqButton> {}
+        button_size: vec2(25.0, 25.0),
+        grid_x: 16,
+        grid_y: 16,
+        
+        margin: {top: 3, right: 10, bottom: 3, left: 10}
+        width: Fit,
+        height: Fit
+    }
+}
+
+// TODO support a shared 'inputs' struct on drawshaders
+#[derive(Live, LiveHook, LiveRegister)]#[repr(C)]
+struct DrawButton {
+    #[deref] draw_super: DrawQuad,
+    #[live] active: f32,
+    #[live] active_step: f32,
+    #[live] hover: f32,
+}
+
+#[derive(Live, LiveHook, LiveRegister)]
+pub struct SeqButton {
+    #[live] draw_button: DrawButton,
+    #[animator] animator: Animator,
+    #[live] x: usize,
+    #[live] y: usize,
+   // #[live] activestep: f32
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, Copy, PartialEq, FromLiveId)]
+pub struct SeqButtonId(pub LiveId);
+
+#[derive(Live, Widget)]
+pub struct Sequencer {
+    #[redraw] #[rust] area: Area,
+    #[walk] walk: Walk,
+    #[live] button: Option<LivePtr>,
+    #[live] current_step: usize,
+    #[live] grid_x: usize,
+    #[live] grid_y: usize,
+    
+    #[live] button_size: DVec2,
+    
+    #[rust] buttons: ComponentMap<SeqButtonId, SeqButton>,
+}
+
+impl LiveHook for Sequencer {
+fn after_apply(&mut self, cx: &mut Cx, apply: &mut Apply, index: usize, nodes: &[LiveNode]) {
+        for button in self.buttons.values_mut() {
+            if let Some(index) = nodes.child_by_name(index, live_id!(button).as_field()) {
+                button.apply(cx, apply, index, nodes);
+            }
+        }
+        self.area.redraw(cx);
+    }
+}
+
+#[derive(Clone, Debug, DefaultNone)]
+pub enum SequencerAction {
+    Change,
+    None
+}
+
+impl SeqButton {
+    
+    pub fn draw_abs(&mut self, cx: &mut Cx2d, rect: Rect) {
+        self.draw_button.draw_abs(cx, rect);
+    }
+    
+    fn set_is_active(&mut self, cx: &mut Cx, is: bool, animate: Animate) {
+        self.animator_toggle(cx, is, animate, id!(active.on), id!(active.off))
+    }
+    
+    fn is_active(&self, cx: &Cx) -> bool {
+        self.animator_in_state(cx, id!(active.on))
+    }
+    
+    pub fn handle_event_changed(
+        &mut self,
+        cx: &mut Cx,
+        event: &Event,
+        sweep_area: Area,
+    )->bool {
+        if self.animator_handle_event(cx, event).must_redraw() {
+            self.draw_button.area().redraw(cx);
+        }
+        match event.hits_with_options(
+            cx,
+            self.draw_button.area(),
+            HitOptions::new().with_sweep_area(sweep_area)
+        ) {
+            Hit::FingerHoverIn(_) => {
+                cx.set_cursor(MouseCursor::Hand);
+                self.animator_play(cx, id!(hover.on));
+            }
+            Hit::FingerHoverOut(_) => {
+                self.animator_play(cx, id!(hover.off));
+            }
+            Hit::FingerDown(_) => {
+                self.animator_play(cx, id!(hover.on));
+                if self.animator_in_state(cx, id!(active.on)) {
+                    self.animator_play(cx, id!(active.off));
+                    return true
+                }
+                else {
+                    self.animator_play(cx, id!(active.on));
+                    return true
+                }
+            }
+            Hit::FingerUp(se) => {
+                if !se.is_sweep && se.is_over && se.device.has_hovers() {
+                    self.animator_play(cx, id!(hover.on));
+                }
+                else {
+                    self.animator_play(cx, id!(hover.off));
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+}
+
+
+impl Sequencer {
+    
+    pub fn _set_key_focus(&self, cx: &mut Cx) {
+        cx.set_key_focus(self.area);
+    }
+    
+    pub fn get_steps(&self, cx: &Cx) -> Vec<u32> {
+        let mut steps = Vec::new();
+        steps.resize(self.grid_y, 0u32);
+        for (btn_id, button) in self.buttons.iter() {
+            let active = button.is_active(cx);
+            let i = btn_id.0.0 as usize;
+            let x = i % self.grid_x;
+            let y = i / self.grid_x;
+            if active {steps[x] |= 1 << y};
+        }
+        steps
+    }
+    
+    pub fn set_steps(&mut self, cx: &mut Cx, steps: &[u32]) {
+        if steps.len() != self.grid_x {
+            panic!("Steps not correct for sequencer got {} expected {}", steps.len(), self.grid_x);
+        }
+        for (btn_id, button) in self.buttons.iter_mut() {
+            let i = btn_id.0.0 as usize;
+            let x = i % self.grid_x;
+            let y = i / self.grid_x;
+            let bit = 1 << y;
+            let active = steps[x] & bit == bit;
+            button.set_is_active(cx, active, Animate::Yes);
+        }
+    }
+    
+    pub fn write_state_to_data(&self, cx: &mut Cx, nodes: &mut LiveNodeVec, path: &[LiveId]) {
+        let steps = self.get_steps(cx);
+        let mut array = LiveNodeVec::new();
+        array.open_array(LiveId(0));
+        for step in steps {
+            array.push(LiveNode::from_value(LiveValue::Int64(step as i64)));
+        }
+        array.close();
+        nodes.write_field_nodes(path, &array);
+    }
+}
+
+
+impl Widget for Sequencer {
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        let uid = self.widget_uid();
+        for button in self.buttons.values_mut() {
+            if button.handle_event_changed(cx, event, self.area){
+                cx.widget_action(uid, &scope.path, SequencerAction::Change);
+            }
+        }
+    }
+
+    fn draw_walk(&mut self, cx: &mut Cx2d, _scope: &mut Scope, walk: Walk) -> DrawStep {
+        cx.begin_turtle(walk, Layout::default());
+                
+        // cells are always square: fit the smaller dimension, centre horizontally
+        let rect = cx.turtle().rect();
+        let cell = (rect.size.x / self.grid_x as f64).min(rect.size.y / self.grid_y as f64);
+        let sz = dvec2(cell, cell);
+        let start_pos = cx.turtle().pos() + dvec2((rect.size.x - cell * self.grid_x as f64) * 0.5, 0.0);
+        let button = self.button;
+        for y in 0..self.grid_y {
+            for x in 0..self.grid_x {
+                let i = x + y * self.grid_x;
+                let pos = start_pos + dvec2(x as f64 * sz.x, y as f64 * sz.y);
+                let btn_id = LiveId(i as u64).into();
+                let btn = self.buttons.get_or_insert(cx, btn_id, | cx | {
+                    SeqButton::new_from_ptr(cx, button)
+                });
+                btn.x = x;
+                btn.y = y;
+                if x == self.current_step{
+                    btn.draw_button.active_step = 1.0;
+                }
+                else
+                {
+                    btn.draw_button.active_step = 0.0;
+                }
+                btn.draw_abs(cx, Rect {pos: pos, size: sz});
+            }
+        }
+        let used = dvec2(self.grid_x as f64 * self.button_size.x, self.grid_y as f64 * self.button_size.y);
+                
+        cx.turtle_mut().set_used(used.x, used.y);
+                
+        cx.end_turtle_with_area(&mut self.area);
+        self.buttons.retain_visible();
+        DrawStep::done()
+    }
+    
+    fn widget_to_data(&self, cx: &mut Cx, actions: &Actions, nodes: &mut LiveNodeVec, path: &[LiveId]) -> bool {
+        let uid = self.widget_uid();
+        if actions.find_widget_action(uid).is_some() {
+            self.write_state_to_data(cx, nodes, path);
+            true
+        }
+        else {
+            false
+        }
+    }
+
+    fn data_to_widget(&mut self, cx: &mut Cx, nodes:&[LiveNode], path: &[LiveId]){
+        if let Some(mut index) = nodes.child_by_field_path(0, path) {
+            let mut steps = Vec::new();
+            if nodes[index].is_array() {
+                index += 1;
+                while !nodes[index].is_close() {
+                    steps.push(nodes[index].value.as_int().unwrap_or(0) as u32);
+                    index += 1;
+                }
+            }
+            self.set_steps(cx, &steps);
+        }
+    }
+}
+
+impl SequencerRef {
+    /// Moves the playhead highlight.
+    pub fn set_step(&self, cx: &mut Cx, step: usize) {
+        if let Some(mut inner) = self.borrow_mut() {
+            if inner.current_step != step {
+                inner.current_step = step;
+                inner.redraw(cx);
+            }
+        }
+    }
+
+    /// Writes the grid without emitting a Change action (the caller owns the model).
+    pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
+        if let Some(mut inner) = self.borrow_mut() {
+            if steps.len() == inner.grid_x {
+                inner.set_steps(cx, steps);
+            }
+        }
+    }
+
+    pub fn clear_grid(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            let mut steps = inner.get_steps(cx);
+            for step in &mut steps {*step = 0};
+            inner.set_steps(cx, &steps);
+            cx.widget_action(inner.widget_uid(), &HeapLiveIdPath::default(), SequencerAction::Change);
+        }
+    }
+    
+    pub fn grid_down(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            let mut steps = inner.get_steps(cx);
+            for step in &mut steps {
+                let mut modstep = *step << 1;
+                if (modstep & 1 << 16) == 1 << 16 {modstep += 1; modstep -= 1 << 16};
+                *step = modstep;
+            }
+            inner.set_steps(cx, &steps);
+            cx.widget_action(inner.widget_uid(), &HeapLiveIdPath::default(), SequencerAction::Change);
+        }
+    }
+    
+    pub fn grid_up(&self, cx: &mut Cx) {
+        if let Some(mut inner) = self.borrow_mut() {
+            let mut steps = inner.get_steps(cx);
+            for step in &mut steps {
+                let mut modstep = *step >> 1;
+                if (*step & 1) == 1 {modstep += 1 << 15;}
+                *step = modstep;
+            }
+            inner.set_steps(cx, &steps);
+            cx.widget_action(inner.widget_uid(), &HeapLiveIdPath::default(), SequencerAction::Change);
+        }
+    }
+}
+
+impl SequencerSet {
+    pub fn set_step(&self, cx: &mut Cx, step: usize) {
+        for item in self.iter() {
+            item.set_step(cx, step);
+        }
+    }
+
+    pub fn set_steps(&self, cx: &mut Cx, steps: &[u32]) {
+        for item in self.iter() {
+            item.set_steps(cx, steps);
+        }
+    }
+}
