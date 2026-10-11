@@ -1,6 +1,24 @@
+```
+██······██····██████····██······██····████████··██······██····██████····
+████··████··██······██··████····██··██··········██······██··██······██··
+██··██··██··██████████··██··██··██··██··██████··██······██··██······██··
+██······██··██······██··██····████··██······██··██······██··██······██··
+██······██··██······██··██······██····████████····██████······██████····
+
+··████████··████████······██████····██████··██······██··      ··██··
+██··········██······██··██······██····██····████····██··      ····██
+██··██████··████████····██████████····██····██··██··██··      ██████
+██······██··██··██······██······██····██····██····████··
+··████████··██····████··██······██··██████··██······██··
+```
+
 # Manguo Grain
 
-A Game-of-Life granular delay, as a VST3 / CLAP plugin for macOS (Apple Silicon).
+A Game-of-Life granular delay, as a VST3 / CLAP plugin for macOS (Apple Silicon) and Windows (x64).
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Manguo Grain editor: 16×16 life grid with the playhead, delay, grain, motion, return and input controls" width="640">
+</p>
 
 Audio on the track is recorded into a 16×16 grid of cells. The playhead
 walks the columns in `Time`; every live cell holds a grain and plays it when

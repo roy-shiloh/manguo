@@ -110,6 +110,8 @@ pub struct Sequencer {
     #[live] button_size: DVec2,
     
     #[rust] buttons: ComponentMap<SeqButtonId, SeqButton>,
+    /// steps written before the cells existed; applied on the first draw
+    #[rust] pending_steps: Option<Vec<u32>>,
 }
 
 impl LiveHook for Sequencer {
@@ -213,6 +215,11 @@ impl Sequencer {
         if steps.len() != self.grid_x {
             panic!("Steps not correct for sequencer got {} expected {}", steps.len(), self.grid_x);
         }
+        if self.buttons.is_empty() {
+            self.pending_steps = Some(steps.to_vec());
+            self.area.redraw(cx);
+            return;
+        }
         for (btn_id, button) in self.buttons.iter_mut() {
             let i = btn_id.0.0 as usize;
             let x = i % self.grid_x;
@@ -256,13 +263,19 @@ impl Widget for Sequencer {
         let sz = dvec2(cell, cell);
         let start_pos = cx.turtle().pos() + dvec2((rect.size.x - cell * self.grid_x as f64) * 0.5, 0.0);
         let button = self.button;
+        let pending = self.pending_steps.take();
         for y in 0..self.grid_y {
             for x in 0..self.grid_x {
                 let i = x + y * self.grid_x;
                 let pos = start_pos + dvec2(x as f64 * sz.x, y as f64 * sz.y);
                 let btn_id = LiveId(i as u64).into();
+                let pending_active = pending.as_ref().map(|s| s[x] & (1 << y) != 0);
                 let btn = self.buttons.get_or_insert(cx, btn_id, | cx | {
-                    SeqButton::new_from_ptr(cx, button)
+                    let mut b = SeqButton::new_from_ptr(cx, button);
+                    if let Some(active) = pending_active {
+                        b.set_is_active(cx, active, Animate::No);
+                    }
+                    b
                 });
                 btn.x = x;
                 btn.y = y;
