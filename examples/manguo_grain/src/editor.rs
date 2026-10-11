@@ -4,7 +4,10 @@
 
 use crate::app::{App, PluginUi, EDITOR_HEIGHT, EDITOR_WIDTH};
 use crate::grain_core::GridShared;
+#[cfg(target_os = "macos")]
 use crate::makepad_widgets::makepad_platform::os::apple::macos::EmbeddedCx;
+#[cfg(target_os = "windows")]
+use crate::makepad_widgets::makepad_platform::os::windows::EmbeddedCx;
 use crate::makepad_widgets::*;
 use crate::GrainParams;
 use baseview::{HandlerError, WindowContext, WindowSettings};
@@ -50,10 +53,7 @@ struct GrainWindowInner {
 
 impl GrainWindow {
     pub fn new(window: WindowContext, plug: PluginUi) -> Result<Self, HandlerError> {
-        let ns_view = match window.window_handle().map(|h| h.as_raw()) {
-            Ok(RawWindowHandle::AppKit(h)) => h.ns_view.as_ptr(),
-            _ => return Err(HandlerError::from_boxed("manguo_grain: host did not give an AppKit NSView".into())),
-        };
+        let raw = window.window_handle().map(|h| h.as_raw());
         let size = window.size();
         let scale = size.scale_factor;
 
@@ -80,14 +80,22 @@ impl GrainWindow {
             let mut c = cx.borrow_mut();
             App::register_main_module(&mut c);
             crate::app::live_design(&mut c);
+            if let Some(root) = crate::resources::locate() {
+                crate::resources::apply(&mut c, &root);
+            }
             c.init_cx_os();
         }
-        let embedded = EmbeddedCx::new(
-            cx,
-            ns_view as *mut std::ffi::c_void,
-            dvec2(size.logical.width, size.logical.height),
-            scale,
-        );
+        let logical = dvec2(size.logical.width, size.logical.height);
+        #[cfg(target_os = "macos")]
+        let embedded = match raw {
+            Ok(RawWindowHandle::AppKit(h)) => EmbeddedCx::new(cx, h.ns_view.as_ptr() as *mut std::ffi::c_void, logical, scale),
+            _ => return Err(HandlerError::from_boxed("manguo_grain: host did not give an AppKit NSView".into())),
+        };
+        #[cfg(target_os = "windows")]
+        let embedded = match raw {
+            Ok(RawWindowHandle::Win32(h)) => EmbeddedCx::new(cx, h.hwnd.get(), logical, scale),
+            _ => return Err(HandlerError::from_boxed("manguo_grain: host did not give a Win32 HWND".into())),
+        };
         Ok(Self {
             window,
             inner: RefCell::new(GrainWindowInner {

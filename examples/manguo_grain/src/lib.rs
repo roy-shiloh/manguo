@@ -7,6 +7,7 @@ pub mod app;
 pub mod editor;
 pub mod grain_core;
 pub mod life;
+pub mod resources;
 pub mod sequencer;
 
 use grain_core::{DelayMode, Engine, EngineParams, GrainScale, GridShared};

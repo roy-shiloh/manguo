@@ -11,9 +11,18 @@ decide how it degrades.
 
 ## Download
 
-**[Manguo Grain 0.1.0 — macOS arm64 (VST3 + CLAP)](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-macOS-arm64.zip)**
+| Platform | Download |
+| --- | --- |
+| macOS (Apple Silicon) | **[Manguo-Grain-macOS-arm64.zip](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-macOS-arm64.zip)** |
+| Windows (x64) | **[Manguo-Grain-Windows-x64.zip](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-Windows-x64.zip)** |
 
-Install: unzip, then move
+Both zips contain the VST3 and the CLAP build. The plugin ships its fonts and
+icons inside the bundle (`Resources/makepad`); keep that folder next to the
+binary.
+
+### macOS
+
+Unzip, then move
 
 - `Manguo Grain.vst3` → `~/Library/Audio/Plug-Ins/VST3/`
 - `Manguo Grain.clap` → `~/Library/Audio/Plug-Ins/CLAP/`
@@ -21,6 +30,16 @@ Install: unzip, then move
 and rescan plugins in your DAW (Ableton Live: Settings → Plug-Ins → Rescan).
 The bundle is ad-hoc signed; if macOS blocks it, right-click → Open once, or
 run `xattr -dr com.apple.quarantine "~/Library/Audio/Plug-Ins/VST3/Manguo Grain.vst3"`.
+
+### Windows
+
+Unzip, then move
+
+- the `Manguo Grain.vst3` **folder** → `C:\Program Files\Common Files\VST3\`
+- the `Manguo Grain` folder (contains `Manguo Grain.clap` + `Resources`) → `C:\Program Files\Common Files\CLAP\`
+
+and rescan plugins. The Windows build is produced by the GitHub Actions
+workflow (`.github/workflows/manguo-grain.yml`) and is not code-signed.
 
 ## Controls
 
@@ -48,8 +67,13 @@ examples/manguo_grain/bundle.sh --install
 ```
 
 builds the release `cdylib`, wraps it as `Manguo Grain.vst3` and
-`Manguo Grain.clap` under `target/release/bundled/`, and copies them into
-`~/Library/Audio/Plug-Ins`. For a quick check without a DAW:
+`Manguo Grain.clap` under `target/release/bundled/` (resources included), and
+copies them into `~/Library/Audio/Plug-Ins`. On Windows, build with
+`cargo build --release -p manguo_grain` and run
+`sh examples/manguo_grain/bundle.sh --windows target/release` (Git Bash) to get
+the same layouts. Pushing a `v*` tag, or running the workflow by hand, builds
+both platforms on GitHub Actions and attaches the zips to the release.
+For a quick check without a DAW:
 
 ```sh
 cargo run --release -p manguo_grain --features standalone --bin manguo_grain_standalone -- --backend coreaudio
@@ -62,7 +86,9 @@ cargo run --release -p manguo_grain --features standalone --bin manguo_grain_sta
 - `src/editor.rs`, `src/app.rs`, `src/sequencer.rs` — the Makepad panel. The host
   window is a [baseview](https://github.com/RustAudio/baseview) child view;
   Makepad renders into it through `EmbeddedCx`
-  (`platform/src/os/apple/macos/macos_embed.rs`).
+  (`platform/src/os/apple/macos/macos_embed.rs` on macOS, Metal;
+  `platform/src/os/windows/windows_embed.rs` on Windows, D3D11).
+- `src/resources.rs` — finds the bundled fonts/icons next to the binary at runtime.
 
 The full Manguo instrument (synth + voice control + this delay) lives in
 [`examples/manguo`](../manguo).

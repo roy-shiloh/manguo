@@ -19,10 +19,12 @@ pub mod http;
 pub mod d3d11;
 pub mod windows;
 pub mod windows_stdin;
+pub mod windows_embed;
 mod web_socket;
 
 pub(crate) use crate::os::windows::d3d11::*; 
 pub(crate) use crate::os::windows::windows::*;
+pub use crate::os::windows::windows_embed::EmbeddedCx;
 pub(crate) use crate::os::windows::winrt_midi::{OsMidiInput, OsMidiOutput};
 pub (crate) use web_socket::OsWebSocket;
 

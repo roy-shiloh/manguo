@@ -2,8 +2,9 @@
 
 This fork of Makepad hosts **Manguo**, a Game-of-Life granular instrument.
 
-- **Manguo Grain** — the granular delay as a VST3 / CLAP plugin for macOS (Apple Silicon).
-  **[Download Manguo Grain 0.1.0](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-macOS-arm64.zip)** ·
+- **Manguo Grain** — the granular delay as a VST3 / CLAP plugin for macOS (Apple Silicon) and Windows (x64).
+  Download: **[macOS (Apple Silicon)](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-macOS-arm64.zip)** ·
+  **[Windows (x64)](https://github.com/roy-shiloh/manguo/releases/latest/download/Manguo-Grain-Windows-x64.zip)** ·
   [README, install and controls](examples/manguo_grain/README.md)
 - **Manguo** — the full instrument (synth, voice control, grain delay) in [`examples/manguo`](examples/manguo);
   build the app with `examples/manguo/bundle_macos.sh`.

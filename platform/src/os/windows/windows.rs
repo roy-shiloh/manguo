@@ -442,5 +442,7 @@ pub struct CxOs {
     pub (crate) media: CxWindowsMedia,
     pub (crate) d3d11_device: Option<ID3D11Device>,
     pub (crate) network_response: NetworkResponseChannel,
+    /// timers for the embedded (externally driven) mode
+    pub (crate) stdin_timers: crate::os::cx_stdin::PollTimers,
     //pub (crate) new_frame_being_rendered: Option<crate::cx_stdin::PresentableDraw>,
 }

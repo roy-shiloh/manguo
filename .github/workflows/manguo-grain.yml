@@ -1,0 +1,72 @@
+name: Manguo Grain plugin
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to attach the builds to (empty = artifacts only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: Manguo-Grain-Windows-x64.zip
+          - os: macos-latest
+            asset: Manguo-Grain-macOS-arm64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: manguo-grain
+
+      - name: Build
+        run: cargo build --release -p manguo_grain
+
+      - name: Bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sh examples/manguo_grain/bundle.sh --windows target/release
+          cd target/release/bundled
+          7z a -tzip "../${{ matrix.asset }}" "Manguo Grain.vst3" "Manguo Grain"
+
+      - name: Bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sh examples/manguo_grain/bundle.sh
+          cd target/release/bundled
+          ditto -c -k --sequesterRsrc . "../${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: target/release/${{ matrix.asset }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          TAG="$RELEASE_TAG"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          gh release upload "$TAG" "target/release/${{ matrix.asset }}" --clobber --repo "$GITHUB_REPOSITORY"
