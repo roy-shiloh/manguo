@@ -1,12 +1,12 @@
 [package]
 name = "manguo_grain"
 version = "0.1.0"
-authors = ["Makepad <info@makepad.nl>"]
+authors = ["Roy Shiloh"]
 edition = "2021"
 description = "Manguo Grain: Game-of-Life granular delay as a VST3/CLAP plugin"
-license = "MIT OR Apache-2.0"
-homepage = "https://github.com/makepad/makepad/"
-repository = "https://github.com/makepad/makepad/"
+license = "MIT"
+homepage = "https://github.com/roy-shiloh/manguo"
+repository = "https://github.com/roy-shiloh/manguo"
 publish = false
 
 [lib]

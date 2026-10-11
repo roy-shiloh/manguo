@@ -1,12 +1,12 @@
 [package]
 name = "manguo"
 version = "0.7.0"
-authors = ["Makepad <info@makepad.nl>"]
+authors = ["Roy Shiloh"]
 edition = "2021"
 description = "Manguo: voice-driven Ironfish synth with a Life grain sequencer"
-license = "MIT OR Apache-2.0"
-homepage = "https://github.com/makepad/makepad/"
-repository = "https://github.com/makepad/makepad/"
+license = "MIT"
+homepage = "https://github.com/roy-shiloh/manguo"
+repository = "https://github.com/roy-shiloh/manguo"
 metadata.makepad-auto-version = "SERZftlt_guLUnOKc-t4SNqvbkg="
 
 [dependencies]

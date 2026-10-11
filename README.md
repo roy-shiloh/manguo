@@ -52,4 +52,5 @@ which places `Manguo.app` in `~/Applications`.
 
 ## License
 
-Manguo is built on Makepad, © Makepad B.V., MIT licensed — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). Manguo, Manguo Grain and the fork changes are
+© 2026 Roy Shiloh; Makepad is © Makepad B.V.
