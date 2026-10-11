@@ -8,7 +8,8 @@
 
 # Manguo
 
-A Game-of-Life granular instrument.
+A Game-of-Life granular instrument, written in Rust — audio engine, plugin
+and UI alike — on the [Makepad](https://github.com/makepad/makepad) UI framework.
 
 Sound is recorded into a 16×16 grid of cells. A playhead walks the columns;
 every live cell holds a grain and plays it when the playhead passes. Each pass
@@ -53,4 +54,4 @@ which places `Manguo.app` in `~/Applications`.
 ## License
 
 MIT — see [`LICENSE`](LICENSE). Manguo, Manguo Grain and the fork changes are
-© 2026 Roy Shiloh; Makepad is © Makepad B.V.
+© 2026 Roy Shiloh; [Makepad](https://github.com/makepad/makepad) is © Makepad B.V.

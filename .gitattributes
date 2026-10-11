@@ -5,6 +5,10 @@
 *.rs       text diff=rust
 *.toml     text diff=toml
 Cargo.lock text
+
+# GitHub language statistics: the WebAssembly spec test suite vendored under
+# libs/stitch is not this project's code.
+libs/stitch/tests/testsuite/** linguist-vendored
 # Taken from https://github.com/gitattributes/gitattributes/blob/master/Common.gitattributes
 # Common settings that generally should always be used with your language specific settings
 
